@@ -1,0 +1,14 @@
+# Переменные окружения для ReAIboot UI
+# Скопируйте этот файл в .env.local и заполните значениями
+
+# Supabase Configuration
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_here
+
+# API Configuration
+NEXT_PUBLIC_API_URL=http://localhost:8001
+
+# Инструкции:
+# 1. Скопируйте этот файл: cp env-setup.txt .env.local
+# 2. Заполните реальные значения из Supabase Dashboard
+# 3. Получите ключи: https://supabase.com/dashboard → Your Project → Settings → API

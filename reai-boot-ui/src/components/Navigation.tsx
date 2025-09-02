@@ -27,7 +27,7 @@ const navigation = [
 
 export function Navigation() {
   const pathname = usePathname()
-  const { user, signOut, loading } = useSupabase()
+  const { user, permissions, signOut, loading } = useSupabase()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
   if (loading) {
@@ -66,6 +66,21 @@ export function Navigation() {
     )
   }
 
+  // Фильтруем навигацию в зависимости от прав
+  const filteredNavigation = navigation.filter(item => {
+    if (!permissions?.hasAccess) {
+      // В демо режиме только дашборд
+      return item.href === '/'
+    }
+    if (item.href === '/admin' && !permissions.canAdmin) {
+      return false
+    }
+    if (item.href === '/parsing' && !permissions.canParse) {
+      return false
+    }
+    return true
+  })
+
   return (
     <nav className="bg-white shadow-sm border-b">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -79,7 +94,7 @@ export function Navigation() {
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-8">
-            {navigation.map((item) => {
+            {filteredNavigation.map((item) => {
               const isActive = pathname === item.href
               return (
                 <Link
@@ -132,7 +147,7 @@ export function Navigation() {
         {/* Mobile Navigation */}
         <div className="md:hidden border-t">
           <div className="px-2 pt-2 pb-3 space-y-1">
-            {navigation.map((item) => {
+            {filteredNavigation.map((item) => {
               const isActive = pathname === item.href
               return (
                 <Link
