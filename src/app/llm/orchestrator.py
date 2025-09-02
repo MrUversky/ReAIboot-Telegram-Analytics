@@ -13,6 +13,7 @@ from .analysis_processor import AnalysisProcessor
 from .generator_processor import GeneratorProcessor
 from ..settings import settings
 from ..utils import setup_logger
+from ..supabase_client import supabase_client
 
 # Настройка логирования
 logger = setup_logger(__name__)
@@ -237,8 +238,139 @@ class LLMOrchestrator:
             else:
                 final_results.append(result)
 
+        # Сохраняем результаты в базу данных
+        if supabase_client.is_connected():
+            await self._save_results_to_database(final_results, posts)
+
         logger.info(f"Завершена пакетная обработка: {len(final_results)} результатов")
         return final_results
+
+    async def _save_results_to_database(self, results: List[OrchestratorResult], original_posts: List[Dict[str, Any]]):
+        """Сохраняет результаты обработки в базу данных."""
+        try:
+            logger.info(f"Сохранение {len(results)} результатов в базу данных")
+
+            # Создаем словарь для быстрого поиска оригинальных данных поста
+            posts_dict = {f"{post['message_id']}_{post['channel_username']}": post for post in original_posts}
+
+            saved_analyses = 0
+            saved_scenarios = 0
+
+            for result in results:
+                if not result.overall_success:
+                    continue
+
+                post_data = posts_dict.get(result.post_id)
+                if not post_data:
+                    logger.warning(f"Не найдены оригинальные данные для поста {result.post_id}")
+                    continue
+
+                # Сохраняем результаты анализа
+                for stage in result.stages:
+                    if stage.success and stage.data:
+                        analysis_data = {
+                            'post_id': result.post_id,
+                            'analysis_type': stage.stage_name,
+                            'status': 'completed',
+                            'tokens_used': stage.tokens_used,
+                            'processing_time_seconds': stage.processing_time,
+                            'created_at': self._get_current_timestamp(),
+                            'updated_at': self._get_current_timestamp()
+                        }
+
+                        # Добавляем специфичные данные для каждого этапа
+                        if stage.stage_name == 'filter':
+                            analysis_data.update({
+                                'is_suitable': stage.data.get('suitable', False),
+                                'suitability_score': stage.data.get('score', 0),
+                                'filter_reason': stage.data.get('reason', '')
+                            })
+                        elif stage.stage_name == 'analysis':
+                            analysis_data.update({
+                                'success_factors': stage.data.get('success_factors', {}),
+                                'audience_insights': stage.data.get('audience_insights', {}),
+                                'content_quality_score': stage.data.get('quality_score', 0)
+                            })
+                        elif stage.stage_name == 'generator':
+                            analysis_data.update({
+                                'generated_scenarios': stage.data.get('scenarios', []),
+                                'selected_rubric_id': stage.data.get('selected_rubric'),
+                                'selected_format_id': stage.data.get('selected_format')
+                            })
+
+                        # Сохраняем использование токенов
+                        if stage.tokens_used > 0:
+                            token_data = {
+                                'model': self._get_model_for_stage(stage.stage_name),
+                                'tokens_used': stage.tokens_used,
+                                'cost_usd': self._calculate_cost(stage.stage_name, stage.tokens_used),
+                                'operation_type': stage.stage_name,
+                                'post_id': result.post_id,
+                                'created_at': self._get_current_timestamp()
+                            }
+                            supabase_client.save_token_usage(token_data)
+
+                        # Сохраняем анализ
+                        if supabase_client.save_post_analysis(analysis_data):
+                            saved_analyses += 1
+
+                # Сохраняем сценарии
+                if result.final_data and result.final_data.get('scenarios'):
+                    scenarios_data = []
+                    for scenario in result.final_data['scenarios']:
+                        scenario_data = {
+                            'post_id': result.post_id,
+                            'title': scenario.get('title', 'Без названия'),
+                            'description': scenario.get('description', ''),
+                            'duration_seconds': scenario.get('duration', 60),
+                            'hook': scenario.get('hook', {}),
+                            'insight': scenario.get('insight', {}),
+                            'content': scenario.get('content', {}),
+                            'call_to_action': scenario.get('call_to_action', {}),
+                            'rubric_id': scenario.get('rubric_id'),
+                            'format_id': scenario.get('format_id'),
+                            'quality_score': scenario.get('quality_score', 0),
+                            'engagement_prediction': scenario.get('engagement_prediction', 0),
+                            'status': 'draft',
+                            'full_scenario': scenario,
+                            'created_at': self._get_current_timestamp(),
+                            'updated_at': self._get_current_timestamp()
+                        }
+                        scenarios_data.append(scenario_data)
+
+                    if supabase_client.save_scenarios(scenarios_data):
+                        saved_scenarios += len(scenarios_data)
+
+            logger.info(f"Сохранено в БД: {saved_analyses} анализов, {saved_scenarios} сценариев")
+
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении результатов в БД: {e}", exc_info=True)
+
+    def _get_current_timestamp(self) -> str:
+        """Возвращает текущую timestamp в формате ISO."""
+        from datetime import datetime
+        return datetime.utcnow().isoformat()
+
+    def _get_model_for_stage(self, stage_name: str) -> str:
+        """Возвращает модель для указанного этапа."""
+        model_mapping = {
+            'filter': 'gpt-4o-mini',
+            'analysis': 'claude-3-5-sonnet-20241022',
+            'generator': 'gpt-4o'
+        }
+        return model_mapping.get(stage_name, 'unknown')
+
+    def _calculate_cost(self, stage_name: str, tokens: int) -> float:
+        """Рассчитывает стоимость использования токенов."""
+        # Примерные цены (нужно обновлять актуальные)
+        prices_per_1k_tokens = {
+            'filter': 0.15,  # GPT-4o-mini
+            'analysis': 3.0,  # Claude-3.5-Sonnet
+            'generator': 2.5  # GPT-4o
+        }
+
+        price = prices_per_1k_tokens.get(stage_name, 0)
+        return round((tokens / 1000) * price, 4)
 
     def get_processor_status(self) -> Dict[str, bool]:
         """Возвращает статус доступности всех процессоров."""
