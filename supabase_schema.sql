@@ -2,7 +2,7 @@
 -- This file contains the complete database schema for the application
 
 -- Enable Row Level Security
-ALTER DATABASE postgres SET "app.jwt_secret" TO 'your-jwt-secret';
+-- Note: app.jwt_secret is automatically configured by Supabase
 
 -- Create custom types
 CREATE TYPE post_status AS ENUM ('pending', 'processing', 'completed', 'failed');
