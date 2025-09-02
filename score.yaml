@@ -1,0 +1,5 @@
+weights:
+  reaction_rate: 0.4
+  reply_rate: 0.3
+  forward_rate: 0.2
+  view_rate: 0.1
