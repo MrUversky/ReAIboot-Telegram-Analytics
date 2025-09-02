@@ -25,7 +25,15 @@ class Settings:
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.openai_base_url = os.getenv("OPENAI_BASE_URL")
         self.openai_model_name = os.getenv("MODEL_NAME", "gpt-4o-mini")
-        
+
+        # Claude настройки
+        self.anthropic_api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+
+        # Supabase настройки
+        self.supabase_url = os.getenv("SUPABASE_URL")
+        self.supabase_anon_key = os.getenv("SUPABASE_ANON_KEY")
+        self.supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
         # Настройки приложения
         self.timezone = os.getenv("TZ", "Asia/Tbilisi")
         

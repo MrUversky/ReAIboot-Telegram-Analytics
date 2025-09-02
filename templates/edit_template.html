@@ -1,0 +1,47 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Редактирование: {{ template_name }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .form-group { margin: 15px 0; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        textarea { width: 100%; min-height: 200px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        input[type="text"] { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .btn { background: #007cba; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+        .btn:hover { background: #005a87; }
+        .btn-secondary { background: #6c757d; }
+        .btn-secondary:hover { background: #545b62; }
+    </style>
+</head>
+<body>
+    <h1>✏️ Редактирование промпта: {{ template_name }}</h1>
+    <a href="/" class="btn btn-secondary">← Назад</a>
+
+    <form method="post" action="/template/{{ template_name }}/update">
+        <div class="form-group">
+            <label>Описание:</label>
+            <input type="text" name="description" value="{{ template.description }}" required>
+        </div>
+
+        <div class="form-group">
+            <label>System Prompt:</label>
+            <textarea name="system_prompt" required>{{ template.system_prompt }}</textarea>
+        </div>
+
+        <div class="form-group">
+            <label>User Prompt:</label>
+            <textarea name="user_prompt" required>{{ template.user_prompt }}</textarea>
+        </div>
+
+        <button type="submit" class="btn">💾 Сохранить изменения</button>
+    </form>
+
+    <h3>🔧 Переменные шаблона:</h3>
+    <pre>{{ template.variables | tojson(indent=2) }}</pre>
+
+    <h3>⚙️ Настройки модели:</h3>
+    <pre>{{ template.model_settings | tojson(indent=2) }}</pre>
+</body>
+</html>

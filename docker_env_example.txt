@@ -1,0 +1,36 @@
+# API ключи для LLM
+OPENAI_API_KEY=your_openai_api_key_here
+CLAUDE_API_KEY=your_claude_api_key_here
+
+# Telegram настройки
+TELEGRAM_API_ID=your_telegram_api_id
+TELEGRAM_API_HASH=your_telegram_api_hash
+TELEGRAM_SESSION=session
+
+# Supabase настройки (основная БД)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+
+# Локальная PostgreSQL (альтернатива для разработки)
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=reai_boot
+POSTGRES_USER=reai_boot
+POSTGRES_PASSWORD=password
+
+# Redis настройки (кеширование)
+REDIS_URL=redis://redis:6379
+
+# Настройки приложения
+TZ=Asia/Tbilisi
+DEBUG=true
+LOG_LEVEL=INFO
+
+# Настройки производительности
+MAX_CONCURRENT_REQUESTS=5
+REQUEST_TIMEOUT=60
+
+# Настройки безопасности
+CORS_ORIGINS=http://localhost:3000,http://localhost:8000
+SECRET_KEY=your_secret_key_here
