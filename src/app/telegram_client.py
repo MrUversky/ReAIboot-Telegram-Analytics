@@ -154,11 +154,11 @@ class TelegramAnalyzer:
                             "timeout": 60
                         }
                 except Exception as e:
-                    logger.warning(f"Ошибка при проверке авторизации: {e}")да!
+                    logger.warning(f"Ошибка при проверке авторизации: {e}")
 
                 # Отправляем код
                 logger.info("Отправляем код подтверждения...")
-                sent_code = await temp_client.send_code(phone)
+                sent_code = await temp_client.send_code_request(phone)
                 logger.info(f"Код успешно отправлен, phone_code_hash: {sent_code.phone_code_hash}")
 
                 return {
