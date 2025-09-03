@@ -34,10 +34,9 @@ export function Collapsible({ children, open, onOpenChange }: CollapsibleProps) 
 
 interface CollapsibleTriggerProps {
   children: React.ReactNode
-  asChild?: boolean
 }
 
-export function CollapsibleTrigger({ children, asChild = false }: CollapsibleTriggerProps) {
+export function CollapsibleTrigger({ children }: CollapsibleTriggerProps) {
   const context = useContext(CollapsibleContext)
 
   if (!context) {
@@ -48,12 +47,6 @@ export function CollapsibleTrigger({ children, asChild = false }: CollapsibleTri
 
   const handleClick = () => {
     setIsOpen(!isOpen)
-  }
-
-  if (asChild) {
-    return React.cloneElement(children as React.ReactElement, {
-      onClick: handleClick
-    })
   }
 
   return (

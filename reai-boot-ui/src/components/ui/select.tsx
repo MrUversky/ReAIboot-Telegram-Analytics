@@ -12,14 +12,16 @@ export function Select({ value, onValueChange, children }: SelectProps) {
 
   return (
     <div className="relative">
-      {React.Children.map(children, (child) =>
-        React.cloneElement(child as React.ReactElement, {
+      {React.Children.map(children, (child) => {
+        const childElement = child as React.ReactElement
+        return React.cloneElement(childElement, {
+          ...(childElement.props as any),
           isOpen,
           setIsOpen,
           value,
           onValueChange
         })
-      )}
+      })}
     </div>
   )
 }

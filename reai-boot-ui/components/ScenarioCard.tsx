@@ -105,7 +105,7 @@ export function ScenarioCard({ scenario, onStatusUpdate, onEdit }: ScenarioCardP
 
         {/* Content preview */}
         <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
-          <CollapsibleTrigger asChild>
+          <CollapsibleTrigger>
             <Button variant="outline" className="w-full justify-between">
               <span>Показать полный сценарий</span>
               {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}

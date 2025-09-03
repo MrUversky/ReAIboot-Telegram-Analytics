@@ -33,17 +33,37 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
 
   const loadUserPermissions = async (userId: string) => {
     try {
+      console.log('Loading permissions for user:', userId)
       const userPerms = await checkUserPermissions(userId)
+      console.log('User permissions loaded:', userPerms)
       setPermissions(userPerms as UserPermissions)
     } catch (error) {
       console.error('Error loading user permissions:', error)
+      // Если профиль не найден, попробуем создать его
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          console.log('Attempting to create profile for user:', user.id)
+          const profile = await createUserProfile(user.id, user.email!, user.user_metadata?.full_name)
+          console.log('Profile created:', profile)
+
+          // Повторно загружаем разрешения
+          const userPerms = await checkUserPermissions(userId)
+          setPermissions(userPerms as UserPermissions)
+          return
+        }
+      } catch (createError) {
+        console.error('Error creating user profile:', createError)
+      }
+
       setPermissions({
         role: 'viewer',
         hasAccess: false,
         isActive: true,
         canParse: false,
         canAnalyze: false,
-        canAdmin: false
+        canAdmin: false,
+        isNewUser: true
       })
     }
   }

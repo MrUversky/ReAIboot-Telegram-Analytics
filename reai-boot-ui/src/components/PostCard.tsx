@@ -98,22 +98,15 @@ export function PostCard({ post, onAnalyze, showAnalysis = true }: PostCardProps
 
       <CardFooter className="pt-3 border-t">
         <div className="flex gap-2 w-full">
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1"
-            asChild
+          <a
+            href={post.permalink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           >
-            <a
-              href={post.permalink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2"
-            >
-              <ExternalLink className="w-4 h-4" />
-              Открыть в TG
-            </a>
-          </Button>
+            <ExternalLink className="w-4 h-4 mr-2" />
+            Открыть в TG
+          </a>
 
           {showAnalysis && onAnalyze && (
             <Button

@@ -71,7 +71,6 @@ export default function AuthPage() {
                   loading_button_label: 'Вход...',
                   social_provider_text: 'Войти через {{provider}}',
                   link_text: 'Уже есть аккаунт? Войти',
-                  confirmation_text: 'Проверьте email для подтверждения',
                 },
                 sign_up: {
                   email_label: 'Email',

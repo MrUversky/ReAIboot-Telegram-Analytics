@@ -24,15 +24,24 @@ class SupabaseClient:
     def _initialize_client(self):
         """Инициализация Supabase клиента."""
         try:
-            if not settings.supabase_url or not settings.supabase_anon_key:
-                logger.warning("Supabase credentials not found, running without database")
+            if not settings.supabase_url:
+                logger.warning("Supabase URL not found, running without database")
+                return
+
+            # Используем сервисный ключ, если он доступен (обходит RLS)
+            api_key = settings.supabase_service_role_key or settings.supabase_anon_key
+
+            if not api_key:
+                logger.warning("No Supabase API key found, running without database")
                 return
 
             self.client = create_client(
                 supabase_url=settings.supabase_url,
-                supabase_key=settings.supabase_anon_key
+                supabase_key=api_key
             )
-            logger.info("Supabase client initialized successfully")
+
+            key_type = "service role" if settings.supabase_service_role_key else "anonymous"
+            logger.info(f"Supabase client initialized successfully (using {key_type} key)")
 
         except Exception as e:
             logger.error(f"Failed to initialize Supabase client: {e}")
@@ -75,15 +84,51 @@ class SupabaseClient:
             return False
 
         try:
-            data = {
-                'username': username,
-                'title': title,
-                'description': description,
-                'updated_at': datetime.utcnow().isoformat()
-            }
+            # Нормализуем username - ВСЕГДА добавляем @ для консистентности
+            canonical_username = username if username.startswith('@') else f'@{username}'
 
-            result = self.client.table('channels').upsert(data).execute()
-            return len(result.data) > 0
+            # Сначала проверим, существует ли уже канал с таким username
+            existing_channel = None
+
+            # Ищем канал с каноническим username (с @)
+            existing_canonical = self.client.table('channels').select('*').eq('username', canonical_username).execute()
+            if existing_canonical.data:
+                existing_channel = existing_canonical.data[0]
+
+            # Если не нашли с @, ищем без @ (старый формат)
+            if not existing_channel:
+                existing_legacy = self.client.table('channels').select('*').eq('username', username.lstrip('@')).execute()
+                if existing_legacy.data:
+                    existing_channel = existing_legacy.data[0]
+                    # Если нашли старый формат, обновим его до канонического
+                    logger.info(f"Found legacy channel {existing_channel['username']}, updating to canonical format")
+
+            if existing_channel:
+                # Обновляем существующий канал
+                update_data = {
+                    'username': canonical_username,  # Всегда используем канонический формат
+                    'title': title,
+                    'description': description,
+                    'updated_at': datetime.utcnow().isoformat()
+                }
+                result = (self.client.table('channels')
+                         .update(update_data)
+                         .eq('id', existing_channel['id'])
+                         .execute())
+                logger.info(f"Updated existing channel {existing_channel['username']} with title '{title}'")
+                return len(result.data) > 0
+            else:
+                # Создаем новый канал с каноническим username
+                data = {
+                    'username': canonical_username,
+                    'title': title,
+                    'description': description,
+                    'updated_at': datetime.utcnow().isoformat()
+                }
+                result = self.client.table('channels').insert(data).execute()
+                logger.info(f"Created new channel {canonical_username} with title '{title}'")
+                return len(result.data) > 0
+
         except Exception as e:
             logger.error(f"Error upserting channel {username}: {e}")
             return False
@@ -123,19 +168,32 @@ class SupabaseClient:
             logger.error(f"Error checking if post is processed: {e}")
             return False
 
-    def save_posts_batch(self, posts: List[Dict[str, Any]]) -> int:
+    def ensure_channel_exists(self, channel_username: str, channel_info: Dict[str, Any] = None) -> bool:
+        """Убедиться, что канал существует в базе данных."""
+        # Используем единый метод upsert_channel для консистентности
+        channel_title = channel_info.get('title') if channel_info else None
+        channel_description = channel_info.get('about') if channel_info else None
+        return self.upsert_channel(channel_username, channel_title, channel_description)
+
+    def save_posts_batch(self, posts: List[Dict[str, Any]], channel_username: str = None, channel_info: Dict[str, Any] = None) -> int:
         """Сохранить batch постов в базу данных."""
         if not self.client:
             return 0
 
         try:
+            # Сначала убедимся, что канал существует
+            if channel_username and posts:
+                channel_title = channel_info.get('title') if channel_info else None
+                channel_description = channel_info.get('about') if channel_info else None
+                self.upsert_channel(channel_username, channel_title, channel_description)
+
             # Подготовим данные для вставки
             posts_data = []
             for post in posts:
                 post_data = {
-                    'id': f"{post['message_id']}_{post['channel_username']}",
+                    'id': f"{post['message_id']}_{post['channel_username'] if post['channel_username'].startswith('@') else '@' + post['channel_username']}",
                     'message_id': post['message_id'],
-                    'channel_username': post['channel_username'],
+                    'channel_username': post['channel_username'] if post['channel_username'].startswith('@') else f"@{post['channel_username']}",
                     'channel_title': post.get('channel_title'),
                     'date': post['date'],
                     'text_preview': post.get('text_preview', '')[:500],  # Ограничим длину
@@ -152,16 +210,26 @@ class SupabaseClient:
                 posts_data.append(post_data)
 
             if posts_data:
-                # Используем upsert для обновления существующих записей
-                result = self.client.table('posts').upsert(posts_data).execute()
+                # Используем upsert для избежания дубликатов и обновления статистики существующих постов
+                result = (self.client.table('posts')
+                         .upsert(
+                             posts_data,
+                             on_conflict='id',
+                             ignore_duplicates=False  # Обновляем существующие записи
+                         )
+                         .execute())
                 saved_count = len(result.data)
-                logger.info(f"Saved {saved_count} posts to database")
+                logger.info(f"Saved/updated {saved_count} posts to database")
                 return saved_count
             else:
                 return 0
 
         except Exception as e:
             logger.error(f"Error saving posts batch: {e}")
+            # Добавим отладочную информацию
+            if posts_data:
+                logger.error(f"First post data: {posts_data[0]}")
+                logger.error(f"Channel username in post: {posts_data[0].get('channel_username')}")
             return 0
 
     def get_recent_posts(self, days: int = 7, limit: int = 1000) -> List[Dict[str, Any]]:
@@ -409,6 +477,48 @@ class SupabaseClient:
             logger.error(f"Error starting parsing session: {e}")
             return None
 
+    def save_parsing_session(self, session_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Сохранить сессию парсинга и вернуть результат."""
+        if not self.client:
+            raise Exception("Supabase client not initialized")
+
+        try:
+            # Добавляем timestamp если не указан
+            if 'started_at' not in session_data:
+                session_data['started_at'] = datetime.utcnow().isoformat()
+
+            result = self.client.table('parsing_sessions').insert(session_data).execute()
+
+            if result.data and len(result.data) > 0:
+                session_id = result.data[0]['id']
+                logger.info(f"Created parsing session with ID: {session_id}")
+                return {'id': session_id}
+            else:
+                raise Exception("Failed to create parsing session")
+        except Exception as e:
+            logger.error(f"Error saving parsing session: {e}")
+            raise e
+
+    def get_parsing_session(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """Получить данные сессии парсинга по ID."""
+        if not self.client:
+            return None
+
+        try:
+            result = (self.client.table('parsing_sessions')
+                     .select('*')
+                     .eq('id', session_id)
+                     .execute())
+
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            else:
+                return None
+
+        except Exception as e:
+            logger.error(f"Error getting parsing session {session_id}: {e}")
+            return None
+
     def complete_parsing_session(self, session_id: int, posts_found: int) -> bool:
         """Завершить сессию парсинга."""
         if not self.client:
@@ -426,6 +536,69 @@ class SupabaseClient:
             return len(result.data) > 0
         except Exception as e:
             logger.error(f"Error completing parsing session: {e}")
+            return False
+
+    def update_parsing_session(self, session_id: int, update_data: Dict[str, Any]) -> bool:
+        """Обновить данные сессии парсинга."""
+        if not self.client:
+            return False
+
+        try:
+            result = (self.client.table('parsing_sessions')
+                     .update(update_data)
+                     .eq('id', session_id)
+                     .execute())
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error updating parsing session {session_id}: {e}")
+            return False
+
+    def get_channel_by_id(self, channel_id: str) -> Optional[Dict[str, Any]]:
+        """Получить канал по ID."""
+        if not self.client:
+            return None
+
+        try:
+            result = (self.client.table('channels')
+                     .select('*')
+                     .eq('id', channel_id)
+                     .execute())
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error fetching channel {channel_id}: {e}")
+            return None
+
+    def update_channel(self, channel_id: str, update_data: Dict[str, Any]) -> bool:
+        """Обновить данные канала."""
+        if not self.client:
+            return False
+
+        try:
+            # Добавляем timestamp обновления
+            update_data['updated_at'] = datetime.utcnow().isoformat()
+
+            result = (self.client.table('channels')
+                     .update(update_data)
+                     .eq('id', channel_id)
+                     .execute())
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error updating channel {channel_id}: {e}")
+            return False
+
+    def delete_channel(self, channel_id: str) -> bool:
+        """Удалить канал."""
+        if not self.client:
+            return False
+
+        try:
+            result = (self.client.table('channels')
+                     .delete()
+                     .eq('id', channel_id)
+                     .execute())
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error deleting channel {channel_id}: {e}")
             return False
 
     # ===== РУБРИКИ И ФОРМАТЫ =====
@@ -482,3 +655,6 @@ class SupabaseClient:
 
 # Глобальный экземпляр клиента
 supabase_client = SupabaseClient()
+
+# Алиас для совместимости с API
+SupabaseManager = SupabaseClient

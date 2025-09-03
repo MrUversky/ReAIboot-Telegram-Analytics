@@ -6,8 +6,31 @@
 echo "🚀 Запуск ReAIboot проекта..."
 echo "================================="
 
+# Функция для остановки старых процессов
+cleanup_old_processes() {
+    echo "🧹 Остановка старых процессов..."
+
+    # Останавливаем старые процессы API
+    pkill -f "python.*run_api.py" 2>/dev/null && echo "✅ Старые API процессы остановлены"
+
+    # Останавливаем старые процессы npm
+    pkill -f "npm.*run.*dev" 2>/dev/null && echo "✅ Старые npm процессы остановлены"
+
+    # Останавливаем процессы на портах 8000 и 3000
+    lsof -ti:8000 | xargs kill -9 2>/dev/null && echo "✅ Освобожден порт 8000"
+    lsof -ti:3000 | xargs kill -9 2>/dev/null && echo "✅ Освобожден порт 3000"
+
+    # Удаляем поврежденные файлы сессий
+    rm -f session_per.session* 2>/dev/null && echo "✅ Поврежденные сессии удалены"
+
+    sleep 2
+}
+
+# Останавливаем старые процессы
+cleanup_old_processes
+
 # Проверка наличия Python виртуального окружения
-if [ ! -d "venv" ]; then
+if [ ! -d "venv_py39" ]; then
     echo "❌ Виртуальное окружение не найдено!"
     echo "Создайте его командой: python -m venv venv"
     exit 1
@@ -21,7 +44,7 @@ fi
 
 # Активация виртуального окружения
 echo "🔧 Активация виртуального окружения..."
-source venv/bin/activate
+source venv_py39/bin/activate
 
 # Установка/обновление зависимостей
 echo "📦 Проверка зависимостей..."
@@ -50,9 +73,9 @@ echo "⏳ Ожидание запуска API сервера..."
 sleep 5
 
 # Проверка работы API
-if curl -s http://localhost:8001/health > /dev/null; then
-    echo "✅ API сервер запущен на http://localhost:8001"
-    echo "📚 Документация API: http://localhost:8001/docs"
+if curl -s http://localhost:8000/health > /dev/null; then
+    echo "✅ API сервер запущен на http://localhost:8000"
+    echo "📚 Документация API: http://localhost:8000/docs"
 else
     echo "❌ Ошибка запуска API сервера!"
     kill $API_PID 2>/dev/null
@@ -77,7 +100,7 @@ if [ -d "reai-boot-ui" ]; then
         echo "Необходимые переменные:"
         echo "  - NEXT_PUBLIC_SUPABASE_URL"
         echo "  - NEXT_PUBLIC_SUPABASE_ANON_KEY"
-        echo "  - NEXT_PUBLIC_API_URL=http://localhost:8001"
+        echo "  - NEXT_PUBLIC_API_URL=http://localhost:8000"
     fi
 
     # Запуск frontend в фоне
@@ -93,8 +116,8 @@ if [ -d "reai-boot-ui" ]; then
     echo "🎉 ПРОЕКТ ЗАПУЩЕН!"
     echo "================================="
     echo "🌐 Frontend: http://localhost:3000"
-    echo "🔧 Backend API: http://localhost:8001"
-    echo "📚 API Docs: http://localhost:8001/docs"
+    echo "🔧 Backend API: http://localhost:8000"
+    echo "📚 API Docs: http://localhost:8000/docs"
     echo ""
     echo "Для остановки нажмите Ctrl+C"
     echo "================================="
@@ -103,8 +126,18 @@ if [ -d "reai-boot-ui" ]; then
     cleanup() {
         echo ""
         echo "🛑 Остановка сервисов..."
+
+        # Мягкая остановка
         kill $API_PID 2>/dev/null
         kill $FRONTEND_PID 2>/dev/null
+
+        # Принудительная остановка через 5 секунд
+        sleep 2
+        pkill -9 -f "python.*run_api.py" 2>/dev/null
+        pkill -9 -f "npm.*run.*dev" 2>/dev/null
+        lsof -ti:8000 | xargs kill -9 2>/dev/null
+        lsof -ti:3000 | xargs kill -9 2>/dev/null
+
         echo "✅ Все сервисы остановлены"
         exit 0
     }
@@ -118,8 +151,8 @@ else
     echo "⚠️  Директория reai-boot-ui не найдена!"
     echo "Frontend не будет запущен"
     echo ""
-    echo "✅ Backend API запущен на http://localhost:8001"
-    echo "📚 Документация: http://localhost:8001/docs"
+    echo "✅ Backend API запущен на http://localhost:8000"
+    echo "📚 Документация: http://localhost:8000/docs"
     echo ""
     echo "Для остановки нажмите Ctrl+C"
 

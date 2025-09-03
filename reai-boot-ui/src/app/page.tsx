@@ -295,31 +295,35 @@ export default function Dashboard() {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => router.push('/posts')}>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <FileText className="w-8 h-8 text-blue-600" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Просмотр постов</p>
-                <p className="text-2xl font-bold text-gray-900">Анализ</p>
+        <div className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => router.push('/posts')}>
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center">
+                <FileText className="w-8 h-8 text-blue-600" />
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Просмотр постов</p>
+                  <p className="text-2xl font-bold text-gray-900">Анализ</p>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
 
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => router.push('/parsing')}>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <Database className="w-8 h-8 text-green-600" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Запустить парсинг</p>
-                <p className="text-2xl font-bold text-gray-900">Telegram</p>
+        <div className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => router.push('/parsing')}>
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center">
+                <Database className="w-8 h-8 text-green-600" />
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Запустить парсинг</p>
+                  <p className="text-2xl font-bold text-gray-900">Telegram</p>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
 
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow">
+        <Card>
           <CardContent className="p-6">
             <div className="flex items-center">
               <Video className="w-8 h-8 text-purple-600" />
@@ -331,7 +335,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow">
+        <Card>
           <CardContent className="p-6">
             <div className="flex items-center">
               <TrendingUp className="w-8 h-8 text-orange-600" />

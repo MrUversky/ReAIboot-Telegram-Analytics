@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Users,
   Shield,
@@ -17,7 +19,12 @@ import {
   UserCheck,
   UserX,
   Crown,
-  Eye
+  Eye,
+  Plus,
+  Edit,
+  Trash2,
+  Check,
+  X
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
@@ -46,6 +53,41 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserProfile[]>([])
   const [stats, setStats] = useState<SystemStats | null>(null)
   const [loadingData, setLoadingData] = useState(true)
+
+  // Убрана функциональность управления каналами - теперь в разделе "Парсинг"
+
+  // LLM settings state
+  const [rubrics, setRubrics] = useState<any[]>([])
+  const [formats, setFormats] = useState<any[]>([])
+  const [prompts, setPrompts] = useState<any[]>([])
+  const [showLLMModal, setShowLLMModal] = useState(false)
+  const [llmTab, setLlmTab] = useState<'rubrics' | 'formats' | 'prompts'>('rubrics')
+  const [rubricForm, setRubricForm] = useState({
+    id: '',
+    name: '',
+    description: '',
+    category: '',
+    is_active: true
+  })
+  const [formatForm, setFormatForm] = useState({
+    id: '',
+    name: '',
+    description: '',
+    duration_seconds: 60,
+    structure: {},
+    is_active: true
+  })
+  const [promptForm, setPromptForm] = useState({
+    id: '',
+    name: '',
+    description: '',
+    prompt_type: 'custom',
+    content: '',
+    model: 'gpt-4o-mini',
+    temperature: 0.7,
+    max_tokens: 2000,
+    is_active: true
+  })
 
   useEffect(() => {
     if (!loading && (!user || !permissions?.canAdmin)) {
@@ -136,6 +178,254 @@ export default function AdminPage() {
       console.error('Error updating user status:', error)
       alert('Ошибка при изменении статуса пользователя')
     }
+  }
+
+
+
+  // LLM settings functions
+  const loadLLMSettings = async () => {
+    try {
+      const [rubricsResult, formatsResult, promptsResult] = await Promise.all([
+        supabase.from('rubrics').select('*').order('name'),
+        supabase.from('reel_formats').select('*').order('name'),
+        supabase.from('llm_prompts').select('*').order('name')
+      ])
+
+      if (rubricsResult.error) throw rubricsResult.error
+      if (formatsResult.error) throw formatsResult.error
+
+      setRubrics(rubricsResult.data || [])
+      setFormats(formatsResult.data || [])
+      setPrompts(promptsResult.error ? [] : (promptsResult.data || []))
+    } catch (error) {
+      console.error('Error loading LLM settings:', error)
+      alert('Ошибка при загрузке настроек LLM')
+    }
+  }
+
+  const handleConfigureLLM = async () => {
+    await loadLLMSettings()
+    setShowLLMModal(true)
+  }
+
+  const saveRubric = async () => {
+    try {
+      const rubricData = {
+        ...rubricForm,
+        updated_at: new Date().toISOString()
+      }
+
+      if (rubricForm.id) {
+        const { error } = await supabase
+          .from('rubrics')
+          .update(rubricData)
+          .eq('id', rubricForm.id)
+        if (error) throw error
+      } else {
+        const newId = `rubric_${Date.now()}`
+        const { error } = await supabase
+          .from('rubrics')
+          .insert([{
+            ...rubricData,
+            id: newId,
+            created_at: new Date().toISOString()
+          }])
+        if (error) throw error
+      }
+
+      await loadLLMSettings()
+      resetRubricForm()
+    } catch (error) {
+      console.error('Error saving rubric:', error)
+      alert('Ошибка при сохранении рубрики')
+    }
+  }
+
+  const saveFormat = async () => {
+    try {
+      const formatData = {
+        ...formatForm,
+        updated_at: new Date().toISOString()
+      }
+
+      if (formatForm.id) {
+        const { error } = await supabase
+          .from('reel_formats')
+          .update(formatData)
+          .eq('id', formatForm.id)
+        if (error) throw error
+      } else {
+        const newId = `format_${Date.now()}`
+        const { error } = await supabase
+          .from('reel_formats')
+          .insert([{
+            ...formatData,
+            id: newId,
+            created_at: new Date().toISOString()
+          }])
+        if (error) throw error
+      }
+
+      await loadLLMSettings()
+      resetFormatForm()
+    } catch (error) {
+      console.error('Error saving format:', error)
+      alert('Ошибка при сохранении формата')
+    }
+  }
+
+  const deleteRubric = async (rubricId: string) => {
+    if (!confirm('Вы уверены, что хотите удалить эту рубрику?')) return
+
+    try {
+      const { error } = await supabase
+        .from('rubrics')
+        .delete()
+        .eq('id', rubricId)
+
+      if (error) throw error
+      await loadLLMSettings()
+    } catch (error) {
+      console.error('Error deleting rubric:', error)
+      alert('Ошибка при удалении рубрики')
+    }
+  }
+
+  const deleteFormat = async (formatId: string) => {
+    if (!confirm('Вы уверены, что хотите удалить этот формат?')) return
+
+    try {
+      const { error } = await supabase
+        .from('reel_formats')
+        .delete()
+        .eq('id', formatId)
+
+      if (error) throw error
+      await loadLLMSettings()
+    } catch (error) {
+      console.error('Error deleting format:', error)
+      alert('Ошибка при удалении формата')
+    }
+  }
+
+  const resetRubricForm = () => {
+    setRubricForm({
+      id: '',
+      name: '',
+      description: '',
+      category: '',
+      is_active: true
+    })
+  }
+
+  const resetFormatForm = () => {
+    setFormatForm({
+      id: '',
+      name: '',
+      description: '',
+      duration_seconds: 60,
+      structure: {},
+      is_active: true
+    })
+  }
+
+  const editRubric = (rubric: any) => {
+    setRubricForm({
+      id: rubric.id,
+      name: rubric.name,
+      description: rubric.description || '',
+      category: rubric.category || '',
+      is_active: rubric.is_active
+    })
+  }
+
+  const editFormat = (format: any) => {
+    setFormatForm({
+      id: format.id,
+      name: format.name,
+      description: format.description || '',
+      duration_seconds: format.duration_seconds || 60,
+      structure: format.structure || {},
+      is_active: format.is_active
+    })
+  }
+
+  const savePrompt = async () => {
+    try {
+      const promptData = {
+        ...promptForm,
+        updated_at: new Date().toISOString()
+      }
+
+      if (promptForm.id) {
+        const { error } = await supabase
+          .from('llm_prompts')
+          .update(promptData)
+          .eq('id', promptForm.id)
+        if (error) throw error
+      } else {
+        const newId = `prompt_${Date.now()}`
+        const { error } = await supabase
+          .from('llm_prompts')
+          .insert([{
+            ...promptData,
+            id: newId,
+            created_at: new Date().toISOString()
+          }])
+        if (error) throw error
+      }
+
+      await loadLLMSettings()
+      resetPromptForm()
+    } catch (error) {
+      console.error('Error saving prompt:', error)
+      alert('Ошибка при сохранении промпта')
+    }
+  }
+
+  const deletePrompt = async (promptId: string) => {
+    if (!confirm('Вы уверены, что хотите удалить этот промпт?')) return
+
+    try {
+      const { error } = await supabase
+        .from('llm_prompts')
+        .delete()
+        .eq('id', promptId)
+
+      if (error) throw error
+      await loadLLMSettings()
+    } catch (error) {
+      console.error('Error deleting prompt:', error)
+      alert('Ошибка при удалении промпта')
+    }
+  }
+
+  const resetPromptForm = () => {
+    setPromptForm({
+      id: '',
+      name: '',
+      description: '',
+      prompt_type: 'custom',
+      content: '',
+      model: 'gpt-4o-mini',
+      temperature: 0.7,
+      max_tokens: 2000,
+      is_active: true
+    })
+  }
+
+  const editPrompt = (prompt: any) => {
+    setPromptForm({
+      id: prompt.id,
+      name: prompt.name,
+      description: prompt.description || '',
+      prompt_type: prompt.prompt_type,
+      content: prompt.content,
+      model: prompt.model,
+      temperature: prompt.temperature,
+      max_tokens: prompt.max_tokens,
+      is_active: prompt.is_active
+    })
   }
 
   const getRoleBadge = (role: string) => {
@@ -288,8 +578,8 @@ export default function AdminPage() {
 
                       <Select
                         value={user.role}
-                        onValueChange={(value: 'admin' | 'user' | 'viewer') =>
-                          updateUserRole(user.id, value)
+                        onValueChange={(value) =>
+                          updateUserRole(user.id, value as 'admin' | 'user' | 'viewer')
                         }
                       >
                         <SelectTrigger className="w-32">
@@ -331,27 +621,19 @@ export default function AdminPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">Каналы для мониторинга</h4>
-              <p className="text-sm text-gray-600 mb-4">
-                Управление списком Telegram каналов для автоматического парсинга
-              </p>
-              <Button variant="outline">
-                <Database className="w-4 h-4 mr-2" />
-                Настроить каналы
+          <div className="text-center py-8">
+            <h4 className="font-medium text-gray-900 mb-2">Настройки системы</h4>
+            <p className="text-sm text-gray-600 mb-6">
+              Управление пользователями и системными настройками
+            </p>
+            <div className="flex justify-center gap-4">
+              <Button variant="outline" onClick={handleConfigureLLM}>
+                <Settings className="w-4 h-4 mr-2" />
+                Настройки LLM
               </Button>
             </div>
-
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">Настройки LLM</h4>
-              <p className="text-sm text-gray-600 mb-4">
-                Управление промптами и настройками ИИ моделей
-              </p>
-              <Button variant="outline">
-                <Settings className="w-4 h-4 mr-2" />
-                Настроить LLM
-              </Button>
+            <div className="mt-4 text-xs text-gray-500">
+              💡 Управление каналами теперь доступно в разделе "Парсинг"
             </div>
           </div>
         </CardContent>

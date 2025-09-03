@@ -19,7 +19,7 @@ class Settings:
         # Telegram настройки
         self.telegram_api_id = int(os.getenv("TELEGRAM_API_ID", "0"))
         self.telegram_api_hash = os.getenv("TELEGRAM_API_HASH", "")
-        self.telegram_session = os.getenv("TELEGRAM_SESSION", "session")
+        self.telegram_session = os.getenv("TELEGRAM_SESSION", "telegram_session")
         
         # OpenAI настройки
         self.openai_api_key = os.getenv("OPENAI_API_KEY")

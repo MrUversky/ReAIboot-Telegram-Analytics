@@ -24,16 +24,7 @@ https://supabase.com/dashboard/project/oxsvtjtgtdaqoslcxdna
 #### 3. Просмотр всех пользователей
 ```sql
 -- Посмотреть всех пользователей и их роли
-SELECT
-    p.id,
-    p.email,
-    p.full_name,
-    p.role,
-    p.is_active,
-    p.created_at,
-    p.last_login
-FROM public.profiles p
-ORDER BY p.created_at DESC;
+MCP 
 ```
 
 #### 4. Изменение роли пользователя
