@@ -79,15 +79,15 @@ export function SelectTrigger({ children, className = '', isOpen, setIsOpen, val
     <button
       type="button"
       onClick={() => setIsOpen?.(!isOpen)}
-      className={`flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-50 dark:border-gray-300 dark:text-gray-900 dark:focus:ring-blue-500 ${className}`}
+      className={`flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:border-gray-300 dark:text-gray-900 dark:focus:ring-blue-500 ${className}`}
     >
-      <span className={selectedText ? "text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}>
+      <span className={selectedText ? "text-gray-900 dark:text-gray-900" : "text-gray-500 dark:text-gray-400"}>
         {selectedText || "Выберите опцию"}
       </span>
       {isOpen ? (
-        <ChevronUp className="h-4 w-4 opacity-50 text-gray-500 dark:text-gray-400" />
+        <ChevronUp className="h-4 w-4 opacity-50 text-gray-500 dark:text-gray-500" />
       ) : (
-        <ChevronDown className="h-4 w-4 opacity-50 text-gray-500 dark:text-gray-400" />
+        <ChevronDown className="h-4 w-4 opacity-50 text-gray-500 dark:text-gray-500" />
       )}
     </button>
   )
@@ -101,7 +101,7 @@ interface SelectValueProps {
 
 export function SelectValue({ placeholder, value, selectedText }: SelectValueProps) {
   return (
-    <span className={selectedText ? "text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}>
+    <span className={selectedText ? "text-gray-900 dark:text-gray-900" : "text-gray-500 dark:text-gray-400"}>
       {selectedText || placeholder}
     </span>
   )
@@ -119,7 +119,7 @@ export function SelectContent({ children, isOpen, onItemClick, selectedText, val
   if (!isOpen) return null
 
   return (
-    <div className="absolute z-10 mt-1 max-h-60 min-w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 text-sm text-gray-900 shadow-lg dark:bg-gray-50 dark:border-gray-300 dark:text-gray-900">
+    <div className="absolute z-10 mt-1 max-h-60 min-w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 text-sm text-gray-900 shadow-lg dark:bg-white dark:border-gray-300 dark:text-gray-900">
       {React.Children.map(children, (child) => {
         const childElement = child as React.ReactElement<any>
         return React.cloneElement(childElement, {
@@ -146,14 +146,14 @@ export function SelectItem({ value, children, onClick, currentValue }: SelectIte
 
   return (
     <div
-      className={`relative cursor-pointer select-none px-3 py-2 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none dark:hover:bg-gray-200 dark:focus:bg-gray-200 ${isSelected ? 'bg-blue-50 text-blue-900 dark:bg-blue-900 dark:text-blue-100' : ''}`}
+      className={`relative cursor-pointer select-none px-3 py-2 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none dark:hover:bg-gray-100 dark:focus:bg-gray-100 ${isSelected ? 'bg-blue-50 text-blue-900 dark:bg-blue-50 dark:text-blue-900' : ''}`}
       onClick={onClick}
       data-value={value}
     >
       <div className="flex items-center justify-between">
         <span>{children}</span>
         {isSelected && (
-          <Check className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <Check className="h-4 w-4 text-blue-600 dark:text-blue-600" />
         )}
       </div>
     </div>
