@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Users,
@@ -24,9 +25,13 @@ import {
   Edit,
   Trash2,
   Check,
-  X
+  X,
+  Zap,
+  Target,
+  BarChart3
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { apiClient } from '@/lib/api'
 
 interface UserProfile {
   id: string
@@ -62,6 +67,22 @@ export default function AdminPage() {
   const [prompts, setPrompts] = useState<any[]>([])
   const [showLLMModal, setShowLLMModal] = useState(false)
   const [llmTab, setLlmTab] = useState<'rubrics' | 'formats' | 'prompts'>('rubrics')
+
+  // Viral Detection settings state
+  const [systemSettings, setSystemSettings] = useState<any[]>([])
+  const [channelBaselines, setChannelBaselines] = useState<any[]>([])
+  const [viralPosts, setViralPosts] = useState<any[]>([])
+  const [showViralModal, setShowViralModal] = useState(false)
+  const [viralTab, setViralTab] = useState<'settings' | 'baselines' | 'posts'>('settings')
+
+  // Telegram Auth state
+  const [telegramStatus, setTelegramStatus] = useState<any>(null)
+  const [showTelegramModal, setShowTelegramModal] = useState(false)
+  const [authStep, setAuthStep] = useState<'phone' | 'code'>('phone')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [verificationCode, setVerificationCode] = useState('')
+  const [phoneCodeHash, setPhoneCodeHash] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
   const [rubricForm, setRubricForm] = useState({
     id: '',
     name: '',
@@ -89,6 +110,145 @@ export default function AdminPage() {
     is_active: true
   })
 
+  // Telegram Auth functions
+  const checkTelegramStatus = async () => {
+    try {
+      const data = await apiClient.healthCheck()
+      setTelegramStatus(data)
+      return data
+    } catch (error) {
+      console.error('Error checking Telegram status:', error)
+      setTelegramStatus({
+        status: 'error',
+        telegram_status: 'error',
+        telegram_authorization_needed: true
+      })
+      return null
+    }
+  }
+
+  const resetTelegramAuth = async () => {
+    if (!confirm('Вы уверены, что хотите сбросить авторизацию Telegram? Это удалит текущую сессию и потребуется повторная авторизация.')) {
+      return
+    }
+
+    setAuthLoading(true)
+    try {
+      const result = await apiClient.resetTelegramAuth()
+
+      if (result.status === 'reset') {
+        alert('Авторизация Telegram сброшена успешно!')
+        setShowTelegramModal(false)
+        await checkTelegramStatus()
+        // Reset form
+        setPhoneNumber('')
+        setVerificationCode('')
+        setAuthStep('phone')
+      } else {
+        alert(`Ошибка: ${result.message}`)
+      }
+    } catch (error) {
+      console.error('Error resetting Telegram auth:', error)
+      alert('Ошибка при сбросе авторизации')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const startTelegramAuth = async () => {
+    setAuthLoading(true)
+    try {
+      const result = await apiClient.startTelegramAuth()
+
+      if (result.status === 'auth_needed') {
+        setAuthStep('phone')
+      } else if (result.status === 'connected') {
+        alert('Telegram уже подключен!')
+        setShowTelegramModal(false)
+        await checkTelegramStatus()
+      }
+    } catch (error) {
+      console.error('Error starting Telegram auth:', error)
+      alert('Ошибка при запуске авторизации')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const sendVerificationCode = async () => {
+    if (!phoneNumber) {
+      alert('Введите номер телефона')
+      return
+    }
+
+    setAuthLoading(true)
+    try {
+      const result = await apiClient.sendTelegramCode(phoneNumber)
+
+      if (result.status === 'code_sent') {
+        setPhoneCodeHash(result.phone_code_hash)
+        setAuthStep('code')
+        alert('Код отправлен! Проверьте SMS')
+      } else {
+        alert(`Ошибка: ${result.message}`)
+        if (result.can_retry) {
+          // Даем возможность повторить
+          setTimeout(() => {
+            if (confirm('Хотите попробовать еще раз?')) {
+              sendVerificationCode()
+            }
+          }, 1000)
+        }
+      }
+    } catch (error) {
+      console.error('Error sending code:', error)
+      alert('Ошибка при отправке кода')
+      if (confirm('Хотите попробовать еще раз?')) {
+        sendVerificationCode()
+      }
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const verifyCode = async () => {
+    if (!verificationCode) {
+      alert('Введите код подтверждения')
+      return
+    }
+
+    setAuthLoading(true)
+    try {
+      const result = await apiClient.verifyTelegramCode(verificationCode, phoneCodeHash)
+
+      if (result.status === 'verified') {
+        alert('Успешная авторизация в Telegram!')
+        setShowTelegramModal(false)
+        await checkTelegramStatus()
+        // Reset form
+        setPhoneNumber('')
+        setVerificationCode('')
+        setAuthStep('phone')
+      } else {
+        alert(`Ошибка: ${result.message}`)
+        if (result.can_retry) {
+          // Даем возможность повторить
+          if (confirm('Хотите попробовать еще раз?')) {
+            setVerificationCode('')
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error verifying code:', error)
+      alert('Ошибка при проверке кода')
+      if (confirm('Хотите попробовать еще раз?')) {
+        setVerificationCode('')
+      }
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!loading && (!user || !permissions?.canAdmin)) {
       router.push('/')
@@ -98,6 +258,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (user && permissions?.canAdmin) {
       loadAdminData()
+      checkTelegramStatus() // Проверяем статус Telegram при загрузке
     }
   }, [user, permissions])
 
@@ -203,9 +364,65 @@ export default function AdminPage() {
     }
   }
 
+  // Viral Detection functions
+  const loadViralSettings = async () => {
+    try {
+      const [settingsResult, baselinesResult, postsResult] = await Promise.all([
+        apiClient.getViralSettings(),
+        apiClient.getChannelBaselines(),
+        apiClient.getViralPosts()
+      ])
+
+      setSystemSettings(settingsResult.settings || [])
+      setChannelBaselines(baselinesResult.baselines || [])
+      setViralPosts(postsResult.posts || [])
+    } catch (error) {
+      console.error('Error loading viral settings:', error)
+      alert('Ошибка при загрузке настроек viral detection')
+    }
+  }
+
   const handleConfigureLLM = async () => {
     await loadLLMSettings()
     setShowLLMModal(true)
+  }
+
+  const handleConfigureViral = async () => {
+    await loadViralSettings()
+    setShowViralModal(true)
+  }
+
+  const updateSystemSetting = async (key: string, value: any) => {
+    try {
+      await apiClient.updateSystemSetting(key, value)
+      alert('Настройка обновлена успешно')
+      await loadViralSettings()
+    } catch (error) {
+      console.error('Error updating system setting:', error)
+      alert('Ошибка при обновлении настройки')
+    }
+  }
+
+  const calculateChannelBaseline = async (channelUsername: string) => {
+    try {
+      await apiClient.calculateChannelBaseline(channelUsername)
+      alert(`Базовые метрики для ${channelUsername} пересчитаны`)
+      await loadViralSettings()
+    } catch (error) {
+      console.error('Error calculating baseline:', error)
+      alert('Ошибка при расчете базовых метрик')
+    }
+  }
+
+  const updateAllBaselines = async () => {
+    try {
+      const result = await apiClient.updateAllBaselines()
+      alert(result.message)
+      await loadViralSettings()
+    } catch (error) {
+      console.error('Error updating baselines:', error)
+      alert('Ошибка при обновлении базовых метрик')
+    }
   }
 
   const saveRubric = async () => {
@@ -626,10 +843,27 @@ export default function AdminPage() {
             <p className="text-sm text-gray-600 mb-6">
               Управление пользователями и системными настройками
             </p>
-            <div className="flex justify-center gap-4">
+            <div className="flex justify-center gap-4 flex-wrap">
               <Button variant="outline" onClick={handleConfigureLLM}>
                 <Settings className="w-4 h-4 mr-2" />
                 Настройки LLM
+              </Button>
+              <Button variant="outline" onClick={handleConfigureViral}>
+                <Zap className="w-4 h-4 mr-2" />
+                Viral Detection
+              </Button>
+              <Button
+                variant={telegramStatus?.telegram_authorization_needed ? "default" : "outline"}
+                onClick={() => setShowTelegramModal(true)}
+                className={telegramStatus?.telegram_authorization_needed ? "bg-red-600 hover:bg-red-700" : ""}
+              >
+                <Database className="w-4 h-4 mr-2" />
+                Telegram Auth
+                {telegramStatus?.telegram_authorization_needed && (
+                  <span className="ml-2 px-2 py-1 bg-red-500 text-white text-xs rounded-full">
+                    Требуется
+                  </span>
+                )}
               </Button>
             </div>
             <div className="mt-4 text-xs text-gray-500">
@@ -638,6 +872,336 @@ export default function AdminPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Viral Detection Modal */}
+      {showViralModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+                  <Zap className="w-6 h-6 mr-2 text-yellow-500" />
+                  Настройки Viral Detection
+                </h2>
+                <Button variant="outline" onClick={() => setShowViralModal(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg">
+                <button
+                  onClick={() => setViralTab('settings')}
+                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                    viralTab === 'settings'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Settings className="w-4 h-4 inline mr-2" />
+                  Системные настройки
+                </button>
+                <button
+                  onClick={() => setViralTab('baselines')}
+                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                    viralTab === 'baselines'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4 inline mr-2" />
+                  Базовые метрики
+                </button>
+                <button
+                  onClick={() => setViralTab('posts')}
+                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                    viralTab === 'posts'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Target className="w-4 h-4 inline mr-2" />
+                  Viral посты
+                </button>
+              </div>
+
+              {/* Settings Tab */}
+              {viralTab === 'settings' && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {systemSettings.map((setting: any) => (
+                      <Card key={setting.key}>
+                        <CardHeader>
+                          <CardTitle className="text-lg">{setting.key}</CardTitle>
+                          <p className="text-sm text-gray-600">{setting.description}</p>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-4">
+                            {typeof setting.value === 'object' ? (
+                              <div className="space-y-2">
+                                {Object.entries(setting.value).map(([key, value]) => (
+                                  <div key={key} className="flex justify-between items-center">
+                                    <span className="text-sm font-medium">{key}:</span>
+                                    <Input
+                                      type="number"
+                                      step="0.01"
+                                      defaultValue={value as string}
+                                      className="w-24"
+                                      onBlur={(e) => {
+                                        const newValue = { ...setting.value, [key]: parseFloat(e.target.value) }
+                                        updateSystemSetting(setting.key, newValue)
+                                      }}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <Input
+                                type="number"
+                                step="0.01"
+                                defaultValue={setting.value}
+                                onBlur={(e) => updateSystemSetting(setting.key, parseFloat(e.target.value))}
+                              />
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Baselines Tab */}
+              {viralTab === 'baselines' && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-medium">Базовые метрики каналов</h3>
+                    <Button onClick={updateAllBaselines} variant="outline">
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Обновить все
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-4">
+                    {channelBaselines.map((baseline: any) => (
+                      <Card key={baseline.channel.channel_username}>
+                        <CardHeader>
+                          <div className="flex justify-between items-center">
+                            <CardTitle>{baseline.channel.title || baseline.channel.username}</CardTitle>
+                            <div className="flex items-center space-x-2">
+                              <Badge variant={baseline.baseline.baseline_status === 'ready' ? 'default' : 'secondary'}>
+                                {baseline.baseline.baseline_status === 'ready' ? 'Готов' : 'Обучение'}
+                              </Badge>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => calculateChannelBaseline(baseline.channel.username)}
+                              >
+                                Пересчитать
+                              </Button>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div>
+                              <p className="text-sm text-gray-600">Средний engagement</p>
+                              <p className="text-lg font-bold">{(baseline.baseline.avg_engagement_rate * 100).toFixed(2)}%</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-600">Медиана</p>
+                              <p className="text-lg font-bold">{(baseline.baseline.median_engagement_rate * 100).toFixed(2)}%</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-600">75-й процентиль</p>
+                              <p className="text-lg font-bold">{(baseline.baseline.p75_engagement_rate * 100).toFixed(2)}%</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-600">Постов проанализировано</p>
+                              <p className="text-lg font-bold">{baseline.baseline.posts_analyzed}</p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Viral Posts Tab */}
+              {viralTab === 'posts' && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium">Топ "залетевших" постов</h3>
+
+                  <div className="grid gap-4">
+                    {viralPosts.map((post: any) => (
+                      <Card key={post.id}>
+                        <CardHeader>
+                          <div className="flex justify-between items-center">
+                            <CardTitle className="text-base">
+                              {post.channel_title} • {new Date(post.date).toLocaleDateString('ru-RU')}
+                            </CardTitle>
+                            <div className="flex items-center space-x-2">
+                              <Badge className="bg-yellow-100 text-yellow-800">
+                                Score: {post.viral_score?.toFixed(2)}
+                              </Badge>
+                              <Badge className="bg-blue-100 text-blue-800">
+                                {post.views} просмотров
+                              </Badge>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <p className="text-sm text-gray-700 mb-3 line-clamp-2">
+                            {post.text_preview}
+                          </p>
+                          <div className="grid grid-cols-3 gap-4 text-sm">
+                            <div>
+                              <span className="text-gray-600">Engagement rate:</span>
+                              <span className="font-medium ml-1">{(post.engagement_rate * 100)?.toFixed(2)}%</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Z-score:</span>
+                              <span className="font-medium ml-1">{post.zscore?.toFixed(2)}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Медиана:</span>
+                              <span className="font-medium ml-1">{(post.median_multiplier)?.toFixed(2)}x</span>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Telegram Auth Modal */}
+      {showTelegramModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg max-w-md w-full mx-4">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+                  <Database className="w-6 h-6 mr-2 text-blue-500" />
+                  Авторизация Telegram
+                </h2>
+                <Button variant="ghost" size="sm" onClick={() => setShowTelegramModal(false)}>
+                  ✕
+                </Button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Status */}
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Статус:</span>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      telegramStatus?.telegram_status === 'healthy' ? 'bg-green-100 text-green-800' :
+                      telegramStatus?.telegram_authorization_needed ? 'bg-red-100 text-red-800' :
+                      'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {telegramStatus?.telegram_status === 'healthy' ? 'Подключено' :
+                       telegramStatus?.telegram_authorization_needed ? 'Требуется авторизация' :
+                       'Неизвестно'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Auth Steps */}
+                {authStep === 'phone' && (
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="phone">Номер телефона</Label>
+                      <Input
+                        id="phone"
+                        type="tel"
+                        placeholder="+7XXXXXXXXXX"
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value)}
+                        className="mt-1"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Введите номер телефона в международном формате
+                      </p>
+                    </div>
+
+                    <Button
+                      onClick={sendVerificationCode}
+                      disabled={authLoading}
+                      className="w-full"
+                    >
+                      {authLoading ? 'Отправка...' : 'Отправить код'}
+                    </Button>
+                  </div>
+                )}
+
+                {authStep === 'code' && (
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="code">Код подтверждения</Label>
+                      <Input
+                        id="code"
+                        type="text"
+                        placeholder="12345"
+                        value={verificationCode}
+                        onChange={(e) => setVerificationCode(e.target.value)}
+                        className="mt-1"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Код отправлен на номер {phoneNumber}
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => setAuthStep('phone')}
+                        className="flex-1"
+                      >
+                        Назад
+                      </Button>
+                      <Button
+                        onClick={verifyCode}
+                        disabled={authLoading}
+                        className="flex-1"
+                      >
+                        {authLoading ? 'Проверка...' : 'Подтвердить'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Start Auth Button */}
+                <div className="pt-4 border-t space-y-3">
+                  <Button
+                    variant="outline"
+                    onClick={startTelegramAuth}
+                    disabled={authLoading}
+                    className="w-full"
+                  >
+                    {authLoading ? 'Проверка...' : 'Проверить статус Telegram'}
+                  </Button>
+
+                  {/* Reset Auth Button */}
+                  <Button
+                    variant="outline"
+                    onClick={resetTelegramAuth}
+                    disabled={authLoading}
+                    className="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
+                  >
+                    {authLoading ? 'Сброс...' : '🔄 Сбросить авторизацию'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

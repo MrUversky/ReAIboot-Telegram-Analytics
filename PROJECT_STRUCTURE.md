@@ -60,12 +60,23 @@ cp env-setup.txt .env.local
 
 ### 2. Запуск
 ```bash
-# Быстрый запуск всего
+# Быстрый запуск всего проекта (рекомендуется)
 ./start_project.sh
+
+# Или запуск по отдельности:
+# Backend
+source venv_py39/bin/activate
+./venv_py39/bin/python run_api.py
+
+# Frontend (в новом терминале)
+cd reai-boot-ui
+npm install
+npm run dev
 
 # Результат:
 # 🌐 Frontend: http://localhost:3000
-# 🔧 Backend: http://localhost:8001
+# 🔧 Backend: http://localhost:8000
+# 📚 API Docs: http://localhost:8000/docs
 ```
 
 ## 📁 Описание папок

@@ -159,7 +159,7 @@ class MetricsCalculator:
         
         # Группируем по каналу и сортируем по score
         top_by_channel = []
-        for channel_id, group in df.groupby("channel_id"):
+        for channel_id, group in df.groupby("channel_username"):
             # Сортируем группу по score и выбираем top_n
             top_channel_messages = group.sort_values(by="score", ascending=False).head(top_n)
             top_by_channel.extend(top_channel_messages.to_dict("records"))

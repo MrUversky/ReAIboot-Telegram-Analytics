@@ -23,9 +23,12 @@ import {
   Plus,
   Power,
   PowerOff,
-  Trash2
+  Trash2,
+  Activity,
+  Zap
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { apiClient } from '@/lib/api'
 
 interface ParsingJob {
   id: string
@@ -55,6 +58,7 @@ export default function ParsingPage() {
   const [loadingData, setLoadingData] = useState(true)
   const [showAddChannel, setShowAddChannel] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [systemStatus, setSystemStatus] = useState<any>(null)
 
   // Настройки парсинга
   const [parsingSettings, setParsingSettings] = useState({
@@ -88,10 +92,33 @@ export default function ParsingPage() {
     }
   }, [user, permissions, loading, router])
 
+  // Загрузка статуса системы
+  const loadSystemStatus = async () => {
+    try {
+      const status = await apiClient.healthCheck()
+      setSystemStatus(status)
+    } catch (error) {
+      console.error('Error loading system status:', error)
+      setSystemStatus({ status: 'error', telegram_status: 'error', telegram_authorization_needed: true })
+    }
+  }
+
   useEffect(() => {
     if (user && permissions?.hasAccess) {
       loadParsingData()
+      loadSystemStatus() // Загружаем статус системы
     }
+  }, [user, permissions])
+
+  // Автоматическое обновление статуса системы каждые 30 секунд
+  useEffect(() => {
+    if (!user || !permissions?.hasAccess) return
+
+    const interval = setInterval(() => {
+      loadSystemStatus()
+    }, 30000) // 30 секунд
+
+    return () => clearInterval(interval)
   }, [user, permissions])
 
   const loadParsingData = async () => {
@@ -137,29 +164,36 @@ export default function ParsingPage() {
     }
   }
 
+
+
   const startParsing = async (channelName: string) => {
     try {
       console.log(`Starting parsing for ${channelName}`)
 
-      // Вызываем API для запуска парсинга
-      const response = await fetch('http://localhost:8000/api/parsing/channel', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          channel_username: channelName,
-          days_back: parsingSettings.daysBack,
-          max_posts: parsingSettings.maxPosts,
-          save_to_db: true
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+      // Проверяем статус системы перед запуском
+      console.log('Проверяем статус системы...')
+      if (!systemStatus) {
+        await loadSystemStatus()
       }
 
-      const result = await response.json()
+      if (systemStatus?.telegram_authorization_needed) {
+        alert('❌ Ошибка: Telegram не авторизован!\n\nПерейдите в раздел "Администрирование" → "Telegram Auth" для настройки авторизации.')
+        return
+      }
+
+      if (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available') {
+        alert('❌ Ошибка: Telegram недоступен!\n\nПроверьте подключение к Telegram API.')
+        return
+      }
+
+      console.log('✅ Система готова, запускаем парсинг')
+
+      // Вызываем API для запуска парсинга
+      const result = await apiClient.startChannelParsing(
+        channelName,
+        parsingSettings.daysBack,
+        parsingSettings.maxPosts
+      )
       console.log('Parsing started:', result)
 
       // Обновляем UI с реальными данными
@@ -172,8 +206,11 @@ export default function ParsingPage() {
         started_at: result.started_at
       }])
 
-      // Перезагружаем данные через 2 секунды
-      setTimeout(() => loadParsingData(), 2000)
+      // Перезагружаем статус системы и данные через 2 секунды
+      setTimeout(() => {
+        loadParsingData()
+        loadSystemStatus()
+      }, 2000)
 
     } catch (error) {
       console.error('Error starting parsing:', error)
@@ -202,6 +239,22 @@ export default function ParsingPage() {
     try {
       console.log('Starting bulk parsing for all active channels')
 
+      // Проверяем статус системы перед запуском
+      console.log('Проверяем статус системы...')
+      if (!systemStatus) {
+        await loadSystemStatus()
+      }
+
+      if (systemStatus?.telegram_authorization_needed) {
+        alert('❌ Ошибка: Telegram не авторизован!\n\nПерейдите в раздел "Администрирование" → "Telegram Auth" для настройки авторизации.')
+        return
+      }
+
+      if (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available') {
+        alert('❌ Ошибка: Telegram недоступен!\n\nПроверьте подключение к Telegram API.')
+        return
+      }
+
       // Получаем список всех активных каналов
       const activeChannels = channels
         .filter(channel => channel.is_active)
@@ -213,24 +266,7 @@ export default function ParsingPage() {
       }
 
       // Вызываем API для массового парсинга
-      const response = await fetch('http://localhost:8000/api/parsing/bulk', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          channels: activeChannels,
-          days_back: daysBack,
-          max_posts: maxPosts,
-          save_to_db: true
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const result = await response.json()
+      const result = await apiClient.startBulkParsing(activeChannels, daysBack, maxPosts)
       console.log('Bulk parsing started:', result)
 
       // Добавляем новую задачу в список
@@ -243,8 +279,11 @@ export default function ParsingPage() {
         started_at: new Date().toISOString()
       }])
 
-      // Перезагружаем данные через 3 секунды
-      setTimeout(() => loadParsingData(), 3000)
+      // Перезагружаем статус системы и данные через 3 секунды
+      setTimeout(() => {
+        loadParsingData()
+        loadSystemStatus()
+      }, 3000)
 
     } catch (error) {
       console.error('Error starting bulk parsing:', error)
@@ -258,22 +297,12 @@ export default function ParsingPage() {
       console.log(`${newStatus ? 'Activating' : 'Deactivating'} channel ${channelId}`)
 
       // Вызываем API для обновления статуса канала
-      const response = await fetch(`http://localhost:8000/api/channels/${channelId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username: channels.find(c => c.id === channelId)?.username,
-          title: channels.find(c => c.id === channelId)?.name,
-          is_active: newStatus,
-          parse_frequency_hours: 24
-        })
+      await apiClient.updateChannel(parseInt(channelId), {
+        username: channels.find(c => c.id === channelId)?.username,
+        title: channels.find(c => c.id === channelId)?.name,
+        is_active: newStatus,
+        parse_frequency_hours: 24
       })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
 
       // Обновляем локальное состояние
       setChannels(prev => prev.map(channel =>
@@ -299,13 +328,7 @@ export default function ParsingPage() {
       console.log(`Deleting channel ${channelId}`)
 
       // Вызываем API для удаления канала
-      const response = await fetch(`http://localhost:8000/api/channels/${channelId}`, {
-        method: 'DELETE'
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
+      await apiClient.deleteChannel(parseInt(channelId))
 
       // Удаляем канал из локального состояния
       setChannels(prev => prev.filter(channel => channel.id !== channelId))
@@ -370,13 +393,17 @@ export default function ParsingPage() {
           </p>
         </div>
         <div className="flex gap-3">
+          <Button onClick={loadSystemStatus} variant="outline">
+            <Activity className="w-4 h-4 mr-2" />
+            Обновить статус
+          </Button>
           <Button onClick={loadParsingData} disabled={loadingData}>
             {loadingData ? (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
             ) : (
               <RotateCcw className="w-4 h-4 mr-2" />
             )}
-            Обновить
+            Обновить данные
           </Button>
           <Button
             onClick={() => startBulkParsing(parsingSettings.daysBack, parsingSettings.maxPosts)}
@@ -451,6 +478,99 @@ export default function ParsingPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* System Status */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <Activity className="w-5 h-5 mr-2 text-blue-600" />
+            Статус системы
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Telegram Status */}
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div className="flex items-center">
+                <Database className="w-5 h-5 text-blue-500 mr-3" />
+                <div>
+                  <p className="font-medium text-gray-900">Telegram API</p>
+                  <p className="text-sm text-gray-600">Статус подключения</p>
+                </div>
+              </div>
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                !systemStatus ? 'bg-gray-100 text-gray-800' :
+                systemStatus.telegram_status === 'healthy' ? 'bg-green-100 text-green-800' :
+                systemStatus.telegram_authorization_needed ? 'bg-red-100 text-red-800' :
+                'bg-yellow-100 text-yellow-800'
+              }`}>
+                {!systemStatus ? 'Проверка...' :
+                 systemStatus.telegram_status === 'healthy' ? 'Подключено' :
+                 systemStatus.telegram_authorization_needed ? 'Требуется авторизация' :
+                 'Недоступен'}
+              </span>
+            </div>
+
+            {/* API Status */}
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div className="flex items-center">
+                <Activity className="w-5 h-5 text-green-500 mr-3" />
+                <div>
+                  <p className="font-medium text-gray-900">Backend API</p>
+                  <p className="text-sm text-gray-600">FastAPI сервер</p>
+                </div>
+              </div>
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                !systemStatus ? 'bg-gray-100 text-gray-800' :
+                systemStatus.status === 'healthy' ? 'bg-green-100 text-green-800' :
+                'bg-red-100 text-red-800'
+              }`}>
+                {!systemStatus ? 'Проверка...' :
+                 systemStatus.status === 'healthy' ? 'Работает' :
+                 'Ошибка'}
+              </span>
+            </div>
+
+            {/* LLM Status */}
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div className="flex items-center">
+                <Zap className="w-5 h-5 text-purple-500 mr-3" />
+                <div>
+                  <p className="font-medium text-gray-900">LLM Сервисы</p>
+                  <p className="text-sm text-gray-600">OpenAI/Claude</p>
+                </div>
+              </div>
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                !systemStatus || !systemStatus.llm_status ? 'bg-gray-100 text-gray-800' :
+                Object.values(systemStatus.llm_status).every(v => v) ? 'bg-green-100 text-green-800' :
+                'bg-red-100 text-red-800'
+              }`}>
+                {!systemStatus || !systemStatus.llm_status ? 'Проверка...' :
+                 Object.values(systemStatus.llm_status).every(v => v) ? 'Готовы' :
+                 'Проблемы'}
+              </span>
+            </div>
+          </div>
+
+          {/* Warnings */}
+          {systemStatus?.telegram_authorization_needed && (
+            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex">
+                <AlertCircle className="w-5 h-5 text-red-400 mr-3 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-medium text-red-800">
+                    Требуется авторизация Telegram
+                  </h3>
+                  <p className="mt-1 text-sm text-red-700">
+                    Для работы парсинга необходимо авторизоваться в Telegram.
+                    Перейдите в раздел "Администрирование" → "Telegram Auth".
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Active Jobs */}
       {activeJobs.length > 0 && (

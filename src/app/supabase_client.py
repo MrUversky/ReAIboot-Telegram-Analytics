@@ -7,8 +7,15 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 import json
-from supabase import create_client, Client
-from postgrest.exceptions import APIError
+try:
+    from supabase import create_client, Client
+    from postgrest.exceptions import APIError
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
+    create_client = None
+    Client = None
+    APIError = Exception
 
 from .settings import settings
 
@@ -18,12 +25,16 @@ class SupabaseClient:
     """Клиент для работы с Supabase."""
 
     def __init__(self):
-        self.client: Optional[Client] = None
+        self.client: Optional[Any] = None
         self._initialize_client()
 
     def _initialize_client(self):
         """Инициализация Supabase клиента."""
         try:
+            if not SUPABASE_AVAILABLE:
+                logger.warning("Supabase library not available, running without database")
+                return
+
             if not settings.supabase_url:
                 logger.warning("Supabase URL not found, running without database")
                 return
@@ -650,6 +661,144 @@ class SupabaseClient:
             return result.data
         except Exception as e:
             logger.error(f"Error fetching rubric formats: {e}")
+            return []
+
+    # === МЕТОДЫ ДЛЯ РАБОТЫ С СИСТЕМНЫМИ НАСТРОЙКАМИ ===
+
+    def get_system_setting(self, key: str) -> Optional[Any]:
+        """Получить системную настройку по ключу."""
+        if not self.client:
+            return None
+
+        try:
+            result = self.client.table('system_settings').select('value').eq('key', key).execute()
+            if result.data and len(result.data) > 0:
+                return result.data[0]['value']
+            return None
+        except Exception as e:
+            logger.error(f"Error getting system setting {key}: {e}")
+            return None
+
+    def update_system_setting(self, key: str, value: Any, description: Optional[str] = None) -> bool:
+        """Обновить системную настройку."""
+        if not self.client:
+            return False
+
+        try:
+            update_data = {
+                'value': value,
+                'updated_at': datetime.now().isoformat()
+            }
+            if description:
+                update_data['description'] = description
+
+            self.client.table('system_settings').update(update_data).eq('key', key).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error updating system setting {key}: {e}")
+            return False
+
+    def get_all_system_settings(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Получить все системные настройки."""
+        if not self.client:
+            return []
+
+        try:
+            query = self.client.table('system_settings').select('*')
+            if category:
+                query = query.eq('category', category)
+
+            result = query.execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error fetching system settings: {e}")
+            return []
+
+    # === МЕТОДЫ ДЛЯ РАБОТЫ С БАЗОВЫМИ МЕТРИКАМИ КАНАЛОВ ===
+
+    def get_channel_baseline(self, channel_username: str) -> Optional[Dict[str, Any]]:
+        """Получить базовые метрики канала."""
+        if not self.client:
+            return None
+
+        try:
+            result = self.client.table('channel_baselines').select('*').eq(
+                'channel_username', channel_username
+            ).execute()
+
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error getting channel baseline for {channel_username}: {e}")
+            return None
+
+    def save_channel_baseline(self, baseline_data: Dict[str, Any]) -> bool:
+        """Сохранить базовые метрики канала."""
+        if not self.client:
+            return False
+
+        try:
+            baseline_data['updated_at'] = datetime.now().isoformat()
+            self.client.table('channel_baselines').upsert(
+                baseline_data,
+                on_conflict='channel_username'
+            ).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving channel baseline: {e}")
+            return False
+
+    def get_channels_needing_baseline_update(self, max_age_hours: int = 24) -> List[str]:
+        """Получить каналы, которым нужно обновить базовые метрики."""
+        if not self.client:
+            return []
+
+        try:
+            cutoff_time = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
+
+            result = self.client.table('channel_baselines').select('channel_username').or_(
+                f'last_calculated.lt.{cutoff_time},last_calculated.is.null'
+            ).execute()
+
+            return [row['channel_username'] for row in result.data]
+        except Exception as e:
+            logger.error(f"Error getting channels needing baseline update: {e}")
+            return []
+
+    # === МЕТОДЫ ДЛЯ РАБОТЫ С VIRAL МЕТРИКАМИ ПОСТОВ ===
+
+    def update_post_viral_metrics(self, post_id: str, viral_data: Dict[str, Any]) -> bool:
+        """Обновить viral метрики поста."""
+        if not self.client:
+            return False
+
+        try:
+            viral_data['last_viral_calculation'] = datetime.now().isoformat()
+            viral_data['updated_at'] = datetime.now().isoformat()
+
+            self.client.table('posts').update(viral_data).eq('id', post_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error updating viral metrics for post {post_id}: {e}")
+            return False
+
+    def get_viral_posts(self, channel_username: Optional[str] = None,
+                       min_viral_score: float = 1.5, limit: int = 100) -> List[Dict[str, Any]]:
+        """Получить 'залетевшие' посты."""
+        if not self.client:
+            return []
+
+        try:
+            query = self.client.table('posts').select('*').gte('viral_score', min_viral_score)
+
+            if channel_username:
+                query = query.eq('channel_username', channel_username)
+
+            result = query.order('viral_score', desc=True).limit(limit).execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error getting viral posts: {e}")
             return []
 
 

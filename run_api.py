@@ -17,6 +17,7 @@ if __name__ == "__main__":
     print("📱 Документация API: http://localhost:8000/docs")
     print("🔄 Альтернативная документация: http://localhost:8000/redoc")
     print("❤️  Health check: http://localhost:8000/health")
+    print("📊 Подробный health: http://localhost:8000/api/health")
     print()
 
     uvicorn.run(

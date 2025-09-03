@@ -204,7 +204,8 @@ class DataWriter:
         all_messages: List[Dict[str, Any]],
         top_overall: List[Dict[str, Any]],
         top_by_channel: List[Dict[str, Any]],
-        scenarios: Dict[str, Any] = None
+        scenarios: Dict[str, Any] = None,
+        filtered_posts: List[Dict[str, Any]] = None
     ) -> Dict[str, str]:
         """
         Сохраняет все данные в соответствующие файлы.
@@ -254,6 +255,15 @@ class DataWriter:
         )
         result["top_by_channel"] = top_by_channel_path
         
+        # Сохраняем отфильтрованные посты для LLM
+        if filtered_posts:
+            filtered_posts_path = self.save_to_csv(
+                filtered_posts,
+                "filtered_posts_for_llm.csv",
+                columns=csv_columns
+            )
+            result["filtered_posts"] = filtered_posts_path
+
         # Сохраняем сценарии, если они есть
         if scenarios:
             scenarios_path = self.save_scenarios_to_markdown(
@@ -262,5 +272,5 @@ class DataWriter:
                 "scenarios.md"
             )
             result["scenarios"] = scenarios_path
-        
+
         return result

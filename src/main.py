@@ -8,7 +8,12 @@ import sys
 import time
 from typing import Dict, List, Any, Optional
 import argparse
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+    tqdm = lambda x, **kwargs: x  # fallback без progress bar
 
 from src.app.settings import settings
 from src.app.utils import setup_logger
@@ -19,6 +24,8 @@ from src.app.mapper import ContentMapper
 from src.app.llm import LLMProcessor
 from src.app.writer import DataWriter
 from src.app.cli import CLI
+from src.app.smart_top_posts_filter import SmartTopPostsFilter
+from src.app.supabase_client import SupabaseManager
 
 # Настройка логирования
 logger = setup_logger(__name__)
@@ -80,58 +87,95 @@ async def run_analysis(args: argparse.Namespace) -> None:
         
         # 4. Маппинг сообщений на рубрики
         logger.info("Сопоставление сообщений с рубриками")
-        
+
         mapper = ContentMapper(content_plan=content_plan)
-        
+
         # Маппинг всех сообщений
         messages_with_metrics = mapper.map_messages(messages_with_metrics)
-        
-        # Обновляем топы (они могут содержать ссылки на исходные объекты, которые уже обновлены)
+
+        # 5. УМНАЯ ФИЛЬТРАЦИЯ САМЫХ "ЗАЛЕТЕВШИХ" ПОСТОВ
+        logger.info("Умная фильтрация самых 'залетевших' постов на основе базовых метрик каналов")
+
+        # Инициализируем умный фильтр
+        supabase_manager = SupabaseManager()
+        smart_filter = SmartTopPostsFilter(supabase_manager)
+
+        # Применяем умную фильтрацию
+        filter_result = smart_filter.filter_top_posts(
+            all_posts=messages_with_metrics,
+            max_posts_per_channel=3,  # Максимум 3 поста с канала
+            max_total_posts=top_overall_n  # Общее ограничение
+        )
+
+        # Получаем отфильтрованные посты для дальнейшей обработки
+        top_posts_for_llm = filter_result.selected_posts
+
+        # Обновляем топы для совместимости с существующим кодом
         top_overall = calculator.get_top_overall(messages_with_metrics, top_n=top_overall_n)
         top_by_channel = calculator.get_top_by_channel(messages_with_metrics, top_n=top_per_channel_n)
+
+        # Выводим статистику фильтрации
+        filter_stats = smart_filter.get_filter_stats(filter_result)
+        logger.info("=== СТАТИСТИКА УМНОЙ ФИЛЬТРАЦИИ ===")
+        logger.info(f"Всего постов: {filter_stats['input_posts']}")
+        logger.info(f"Каналов обработано: {filter_stats['channels_processed']}")
+        logger.info(f"Отфильтровано: {filter_stats['filtered_out']}")
+        logger.info(f"Выбрано для LLM: {filter_stats['selected']}")
+        logger.info(f"Эффективность фильтрации: {filter_stats['filter_efficiency']:.1%}")
+        logger.info(".2f")
+        logger.info("Причины отсева:")
+        for reason, count in filter_result.filtered_out.items():
+            if count > 0:
+                logger.info(f"  - {reason}: {count}")
+        logger.info("=" * 30)
         
-        # 5. Генерация сценариев через LLM (если включено)
+        # 6. Генерация сценариев через LLM (если включено)
         scenarios = {}
-        
+
         if use_llm:
-            logger.info("Генерация сценариев через LLM")
-            
+            logger.info("Генерация сценариев через LLM для отфильтрованных постов")
+
             llm_processor = LLMProcessor()
-            
+
             if not llm_processor.is_llm_available():
                 logger.warning("LLM недоступен. Сценарии не будут сгенерированы.")
             else:
-                # Обрабатываем только топовые сообщения
-                for message in tqdm(top_overall, desc="Генерация сценариев"):
+                # Обрабатываем только предварительно отфильтрованные "залетевшие" посты
+                logger.info(f"LLM обработка {len(top_posts_for_llm)} отфильтрованных постов")
+
+                for message in tqdm(top_posts_for_llm, desc="Генерация сценариев"):
                     message_id = message.get("message_id")
-                    
+
                     # Получаем рубрики для сообщения с помощью LLM
                     rubrics = await llm_processor.classify_message(message, mapper.get_all_rubrics())
-                    
+
                     # Если рубрики не определены через LLM, используем рубрики из эвристического маппинга
                     if not rubrics and "rubrics" in message:
                         rubrics = message["rubrics"]
-                    
+
                     # Если есть хотя бы одна рубрика, генерируем сценарий
                     if rubrics:
                         # Берем первую рубрику для сценария
                         rubric_id = rubrics[0]
-                        
+
                         # Генерируем сценарий
                         scenario = await llm_processor.generate_scenarios(message, rubric_id)
                         scenarios[str(message_id)] = scenario
                     else:
                         logger.warning(f"Не удалось определить рубрику для сообщения {message_id}")
+
+                logger.info(f"Сгенерировано сценариев: {len(scenarios)} из {len(top_posts_for_llm)} постов")
         
-        # 6. Сохранение результатов
+        # 7. Сохранение результатов
         logger.info("Сохранение результатов")
-        
+
         writer = DataWriter()
         result_files = writer.save_all_data(
             all_messages=messages_with_metrics,
             top_overall=top_overall,
             top_by_channel=top_by_channel,
-            scenarios=scenarios if use_llm else None
+            scenarios=scenarios if use_llm else None,
+            filtered_posts=top_posts_for_llm if use_llm else None
         )
         
         # Выводим информацию о сохраненных файлах

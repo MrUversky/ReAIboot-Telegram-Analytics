@@ -43,21 +43,53 @@ app.add_middleware(
 
 # Глобальные объекты
 orchestrator = LLMOrchestrator()
-# Инициализируем TelegramAnalyzer с обработкой ошибок
-try:
-    from .app.telegram_client import TelegramAnalyzer
-    telegram_analyzer = TelegramAnalyzer()
-    telegram_available = True
-    logger.info("TelegramAnalyzer успешно инициализирован")
-except ValueError as e:
-    logger.warning(f"Не настроены API ключи Telegram: {e}")
-    telegram_analyzer = None
-    telegram_available = False
-except Exception as e:
-    logger.error(f"Ошибка при инициализации TelegramAnalyzer: {e}")
-    telegram_analyzer = None
-    telegram_available = False
+
+# Telegram инициализация (асинхронная)
+telegram_analyzer = None
+telegram_available = False
+telegram_authorization_needed = False
+
+async def init_telegram():
+    """Асинхронная инициализация Telegram клиента."""
+    global telegram_analyzer, telegram_available, telegram_authorization_needed
+
+    try:
+        from .app.telegram_client import TelegramAnalyzer
+        telegram_analyzer = TelegramAnalyzer()
+
+        # Проверяем, нужна ли авторизация
+        if await telegram_analyzer.needs_authorization():
+            logger.warning("Telegram сессия требует авторизации")
+            telegram_authorization_needed = True
+            telegram_available = False
+            return
+
+        await telegram_analyzer.connect()
+        telegram_available = True
+        telegram_authorization_needed = False
+        logger.info("TelegramAnalyzer успешно инициализирован и подключен")
+    except ValueError as e:
+        logger.warning(f"Не настроены API ключи Telegram: {e}")
+        telegram_analyzer = None
+        telegram_available = False
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации TelegramAnalyzer: {e}")
+        telegram_analyzer = None
+        telegram_available = False
+
+# Инициализация будет выполнена в startup event
 supabase_manager = SupabaseManager()
+
+# Startup event для инициализации Telegram
+@app.on_event("startup")
+async def startup_event():
+    """Инициализация при запуске сервера."""
+    logger.info("🚀 Инициализация ReAIboot API...")
+
+    # Инициализируем Telegram асинхронно
+    await init_telegram()
+
+    logger.info("✅ API сервер готов к работе")
 
 # Pydantic модели для запросов/ответов
 class PostData(BaseModel):
@@ -118,8 +150,15 @@ class HealthResponse(BaseModel):
     version: str
     llm_status: Dict[str, bool]
     telegram_status: str = "unknown"
+    telegram_authorization_needed: bool = False
 
 # Эндпоинты
+
+# Простой health check для мониторинга
+@app.get("/health", tags=["health"])
+async def simple_health():
+    """Простая проверка здоровья системы."""
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 @app.get("/api/", tags=["health"])
 async def root():
@@ -152,8 +191,241 @@ async def health_check():
         status="healthy",
         version="1.0.0",
         llm_status=orchestrator.get_processor_status(),
-        telegram_status=telegram_status
+        telegram_status=telegram_status,
+        telegram_authorization_needed=telegram_authorization_needed
     )
+
+# Telegram авторизация эндпоинты
+@app.post("/api/telegram/start-auth", tags=["telegram"])
+async def start_telegram_auth():
+    """Запускает процесс авторизации Telegram."""
+    global telegram_analyzer, telegram_authorization_needed, telegram_available
+
+    try:
+        from .app.telegram_client import TelegramAnalyzer
+
+        # Создаем новый analyzer только если его нет или он не инициализирован
+        if telegram_analyzer is None:
+            telegram_analyzer = TelegramAnalyzer()
+
+        # Проверяем, нужна ли авторизация
+        needs_auth = await telegram_analyzer.needs_authorization()
+
+        if needs_auth:
+            logger.info("Запуск процесса авторизации Telegram")
+            telegram_authorization_needed = True
+            telegram_available = False
+            return {
+                "status": "auth_needed",
+                "message": "Требуется авторизация. Используйте /api/telegram/send-code для отправки кода",
+                "can_retry": True
+            }
+        else:
+            # Пытаемся подключиться
+            await telegram_analyzer.connect()
+            telegram_available = True
+            telegram_authorization_needed = False
+            return {
+                "status": "connected",
+                "message": "Успешно подключено к Telegram"
+            }
+
+    except Exception as e:
+        logger.error(f"Ошибка при запуске авторизации Telegram: {e}")
+        telegram_available = False
+        telegram_authorization_needed = True
+        return {
+            "status": "error",
+            "message": f"Ошибка: {str(e)}",
+            "can_retry": True
+        }
+
+@app.post("/api/telegram/send-code", tags=["telegram"])
+async def send_telegram_code(phone_data: Dict[str, str]):
+    """Отправляет код подтверждения на номер телефона."""
+    global auth_client, auth_phone_hash
+
+    try:
+        phone = phone_data.get("phone")
+        if not phone:
+            raise ValueError("Не указан номер телефона")
+
+        # Очищаем предыдущего клиента если он существует
+        if auth_client:
+            try:
+                await auth_client.disconnect()
+            except:
+                pass
+            auth_client = None
+
+        # Используем async клиент правильно
+        from telethon import TelegramClient
+        import os
+
+        logger.info("Создаем async клиент для авторизации")
+
+        # Создаем async клиент
+        api_id = int(os.getenv("TELEGRAM_API_ID", "0"))
+        api_hash = os.getenv("TELEGRAM_API_HASH", "")
+
+        # Используем основную сессию для авторизации
+        session_file = "session_per"
+        auth_client = TelegramClient(session_file, api_id, api_hash)
+
+        try:
+            # Подключаемся асинхронно
+            logger.info("Подключаемся к Telegram...")
+            await auth_client.connect()
+
+            # Отправляем код (правильный метод из документации)
+            logger.info(f"Отправляем код на номер {phone}")
+            sent_code = await auth_client.send_code_request(phone)
+
+            # Сохраняем phone_code_hash для последующей проверки
+            auth_phone_hash = sent_code.phone_code_hash
+
+            return {
+                "status": "code_sent",
+                "message": f"Код отправлен на {phone}",
+                "phone_code_hash": sent_code.phone_code_hash
+            }
+
+        except Exception as e:
+            # Очищаем клиента при ошибке
+            if auth_client:
+                await auth_client.disconnect()
+                auth_client = None
+            raise
+
+    except Exception as e:
+        logger.error(f"Ошибка при отправке кода: {e}")
+        return {
+            "status": "error",
+            "message": f"Ошибка отправки кода: {str(e)}",
+            "can_retry": True
+        }
+
+# Глобальная переменная для хранения клиента авторизации
+auth_client = None
+auth_phone_hash = None
+
+@app.post("/api/telegram/verify-code", tags=["telegram"])
+async def verify_telegram_code(code_data: Dict[str, str]):
+    """Проверяет код подтверждения."""
+    global telegram_available, telegram_authorization_needed, auth_client, auth_phone_hash
+
+    try:
+        code = code_data.get("code")
+        phone_code_hash = code_data.get("phone_code_hash")
+
+        if not code:
+            raise ValueError("Не указан код подтверждения")
+
+        if not auth_client:
+            return {
+                "status": "error",
+                "message": "Сначала нужно отправить код авторизации",
+                "can_retry": True
+            }
+
+        if phone_code_hash != auth_phone_hash:
+            return {
+                "status": "error",
+                "message": "Неверный phone_code_hash",
+                "can_retry": True
+            }
+
+        logger.info("Проверяем код с существующим клиентом")
+
+        try:
+            # Проверяем код с тем же клиентом
+            logger.info(f"Проверяем код: {code}")
+            await auth_client.sign_in(phone_code_hash, code)
+
+            # Проверяем авторизацию
+            if await auth_client.is_user_authorized():
+                logger.info("Успешная авторизация!")
+                telegram_available = True
+                telegram_authorization_needed = False
+
+                # Сохраняем авторизованного клиента для будущих запросов
+                global telegram_analyzer
+                if telegram_analyzer:
+                    await telegram_analyzer.disconnect()
+                telegram_analyzer = auth_client
+                auth_client = None  # Очищаем временную переменную
+
+                return {
+                    "status": "verified",
+                    "message": "Успешно авторизован в Telegram!"
+                }
+            else:
+                raise ValueError("Авторизация не удалась")
+
+        except Exception as e:
+            logger.error(f"Ошибка при проверке кода: {e}")
+            # Очищаем клиента при ошибке
+            if auth_client:
+                await auth_client.disconnect()
+                auth_client = None
+            raise
+
+    except Exception as e:
+        logger.error(f"Ошибка при проверке кода: {e}")
+        return {
+            "status": "error",
+            "message": f"Ошибка проверки кода: {str(e)}",
+            "can_retry": True
+        }
+
+@app.post("/api/telegram/reset-auth", tags=["telegram"])
+async def reset_telegram_auth():
+    """Сбрасывает авторизацию Telegram для повторного входа."""
+    global telegram_analyzer, telegram_available, telegram_authorization_needed
+
+    try:
+        # Отключаем существующий клиент
+        if telegram_analyzer:
+            try:
+                await telegram_analyzer.disconnect()
+            except Exception as e:
+                logger.warning(f"Ошибка при отключении клиента: {e}")
+
+        # Удаляем файлы сессии
+        import os
+        from .app.settings import settings
+
+        session_files = [
+            f"{settings.telegram_session}.session",
+            f"{settings.telegram_session}.session-journal",
+            f"{settings.telegram_session}.session.backup"
+        ]
+
+        for session_file in session_files:
+            try:
+                if os.path.exists(session_file):
+                    os.remove(session_file)
+                    logger.info(f"Удален файл сессии: {session_file}")
+            except Exception as e:
+                logger.warning(f"Не удалось удалить {session_file}: {e}")
+
+        # Сбрасываем состояние
+        telegram_analyzer = None
+        telegram_available = False
+        telegram_authorization_needed = True
+
+        logger.info("Авторизация Telegram сброшена")
+        return {
+            "status": "reset",
+            "message": "Авторизация сброшена. Можно начать заново."
+        }
+
+    except Exception as e:
+        logger.error(f"Ошибка при сбросе авторизации: {e}")
+        return {
+            "status": "error",
+            "message": f"Ошибка сброса: {str(e)}"
+        }
 
 # LLM эндпоинты
 
@@ -293,6 +565,170 @@ async def update_project_context(context: Dict[str, Any]):
         return {"message": "Контекст проекта обновлен"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка обновления контекста: {str(e)}")
+
+# === НОВЫЕ API ЭНДПОИНТЫ ДЛЯ VIRAL DETECTION ===
+
+# Системные настройки
+
+@app.get("/api/settings", tags=["settings"])
+async def get_system_settings(category: Optional[str] = None):
+    """Получить системные настройки."""
+    try:
+        settings = supabase_manager.get_all_system_settings(category)
+        return {"settings": settings}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения настроек: {str(e)}")
+
+@app.get("/api/settings/{key}", tags=["settings"])
+async def get_system_setting(key: str):
+    """Получить конкретную системную настройку."""
+    try:
+        setting = supabase_manager.get_system_setting(key)
+        if setting is None:
+            raise HTTPException(status_code=404, detail=f"Настройка {key} не найдена")
+        return {"key": key, "value": setting}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения настройки: {str(e)}")
+
+@app.put("/api/settings/{key}", tags=["settings"])
+async def update_system_setting(key: str, value: Any, description: Optional[str] = None):
+    """Обновить системную настройку."""
+    try:
+        success = supabase_manager.update_system_setting(key, value, description)
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Не удалось обновить настройку {key}")
+        return {"message": f"Настройка {key} обновлена"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка обновления настройки: {str(e)}")
+
+# Базовые метрики каналов
+
+@app.get("/api/channels/baselines", tags=["channels"])
+async def get_channel_baselines():
+    """Получить базовые метрики всех каналов."""
+    try:
+        # Получаем все каналы с базовыми метриками
+        channels = supabase_manager.client.table('channels').select('*').execute()
+        baselines = []
+
+        for channel in channels.data:
+            baseline = supabase_manager.get_channel_baseline(channel['username'])
+            if baseline:
+                baselines.append({
+                    'channel': channel,
+                    'baseline': baseline
+                })
+
+        return {"baselines": baselines}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения базовых метрик: {str(e)}")
+
+@app.get("/api/channels/{channel_username}/baseline", tags=["channels"])
+async def get_channel_baseline(channel_username: str):
+    """Получить базовые метрики конкретного канала."""
+    try:
+        baseline = supabase_manager.get_channel_baseline(channel_username)
+        if not baseline:
+            raise HTTPException(status_code=404, detail=f"Базовые метрики для канала {channel_username} не найдены")
+
+        return {"baseline": baseline}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения базовых метрик: {str(e)}")
+
+@app.post("/api/channels/{channel_username}/baseline/calculate", tags=["channels"])
+async def calculate_channel_baseline(channel_username: str):
+    """Пересчитать базовые метрики канала."""
+    try:
+        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+
+        analyzer = ChannelBaselineAnalyzer(supabase_manager)
+        baseline = analyzer.calculate_channel_baseline(channel_username)
+
+        if not baseline:
+            raise HTTPException(status_code=400, detail=f"Недостаточно данных для расчета базовых метрик канала {channel_username}")
+
+        # Сохраняем рассчитанные метрики
+        success = analyzer.save_channel_baseline(baseline)
+        if not success:
+            raise HTTPException(status_code=500, detail="Не удалось сохранить базовые метрики")
+
+        return {"message": f"Базовые метрики канала {channel_username} пересчитаны", "baseline": baseline.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка расчета базовых метрик: {str(e)}")
+
+@app.post("/api/channels/baselines/update", tags=["channels"])
+async def update_all_channel_baselines():
+    """Обновить базовые метрики для всех каналов."""
+    try:
+        from .app.smart_top_posts_filter import SmartTopPostsFilter
+
+        filter = SmartTopPostsFilter(supabase_manager)
+        channels = supabase_manager.get_channels_needing_baseline_update()
+
+        if not channels:
+            return {"message": "Нет каналов, требующих обновления базовых метрик"}
+
+        stats = filter.update_channel_baselines(channels)
+        return {"message": f"Обновлено базовых метрик для {stats['updated']} каналов", "stats": stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка обновления базовых метрик: {str(e)}")
+
+# Viral посты
+
+@app.get("/api/posts/viral", tags=["posts"])
+async def get_viral_posts(channel_username: Optional[str] = None,
+                         min_viral_score: float = 1.5, limit: int = 100):
+    """Получить 'залетевшие' посты."""
+    try:
+        posts = supabase_manager.get_viral_posts(channel_username, min_viral_score, limit)
+        return {"posts": posts, "count": len(posts)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения viral постов: {str(e)}")
+
+@app.post("/api/posts/{post_id}/viral/update", tags=["posts"])
+async def update_post_viral_metrics(post_id: str):
+    """Пересчитать viral метрики для поста."""
+    try:
+        from .app.viral_post_detector import ViralPostDetector
+        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+
+        # Получаем данные поста
+        post_result = supabase_manager.client.table('posts').select('*').eq('id', post_id).execute()
+        if not post_result.data:
+            raise HTTPException(status_code=404, detail=f"Пост {post_id} не найден")
+
+        post = post_result.data[0]
+        channel_username = post['channel_username']
+
+        # Получаем базовые метрики канала
+        baseline_analyzer = ChannelBaselineAnalyzer(supabase_manager)
+        baseline = baseline_analyzer.get_channel_baseline(channel_username)
+
+        if not baseline:
+            raise HTTPException(status_code=400, detail=f"Нет базовых метрик для канала {channel_username}")
+
+        # Анализируем пост
+        detector = ViralPostDetector(baseline_analyzer)
+        result = detector.analyze_post_virality(post, baseline)
+
+        # Обновляем метрики
+        success = detector.update_post_viral_metrics(post_id, result)
+        if not success:
+            raise HTTPException(status_code=500, detail="Не удалось обновить viral метрики")
+
+        return {"message": f"Viral метрики поста {post_id} обновлены", "result": result.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка обновления viral метрик: {str(e)}")
 
 # Статистика и метрики
 

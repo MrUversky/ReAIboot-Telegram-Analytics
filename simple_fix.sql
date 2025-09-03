@@ -40,3 +40,4 @@ FROM channels
 GROUP BY ltrim(username, '@')
 HAVING COUNT(*) > 1;
 
+

@@ -58,7 +58,43 @@ class TelegramAnalyzer:
         self.is_connected = False
         self.api_id = api_id
         self.api_hash = api_hash
-    
+
+    async def needs_authorization(self) -> bool:
+        """Проверяет, нужна ли авторизация для сессии."""
+        try:
+            # Проверяем, существует ли файл сессии
+            session_file = f"{self.client.session.filename}"
+            if not os.path.exists(session_file):
+                logger.info("Файл сессии не найден")
+                return True
+
+            # Проверяем размер файла сессии (пустая сессия ~ 0 байт)
+            if os.path.getsize(session_file) < 1000:  # Минимальный размер валидной сессии
+                logger.warning("Файл сессии слишком мал, вероятно поврежден")
+                return True
+
+            # Пытаемся проверить сессию без полного подключения
+            # Если сессия валидна, это не вызовет исключения
+            try:
+                # Попытка быстрой проверки сессии
+                await self.client.connect()
+                authorized = await self.client.is_user_authorized()
+                await self.client.disconnect()
+
+                if not authorized:
+                    logger.warning("Сессия существует, но пользователь не авторизован")
+                    return True
+
+                return False
+
+            except Exception as e:
+                logger.warning(f"Ошибка при проверке сессии: {e}")
+                return True
+
+        except Exception as e:
+            logger.error(f"Ошибка при проверке необходимости авторизации: {e}")
+            return True
+
     async def connect(self) -> None:
         """Подключается к Telegram API с обработкой авторизации."""
 
@@ -87,6 +123,85 @@ class TelegramAnalyzer:
         except Exception as e:
             logger.error(f"Ошибка подключения к Telegram: {e}")
             self.is_connected = False
+            raise
+
+    async def send_code(self, phone: str) -> Dict[str, Any]:
+        """Отправляет код подтверждения на номер телефона."""
+        try:
+            logger.info(f"=== НАЧАЛО ОТПРАВКИ КОДА НА НОМЕР: {phone} ===")
+
+            # Создаем новый клиент для этого запроса согласно документации
+            from telethon import TelegramClient
+            temp_client = TelegramClient(
+                self.client.session.filename,
+                self.api_id,
+                self.api_hash
+            )
+
+            # Используем контекстный менеджер согласно документации
+            async with temp_client:
+                logger.info("Временный клиент подключен")
+
+                # Проверяем авторизацию
+                try:
+                    is_authorized = await temp_client.is_user_authorized()
+                    logger.info(f"Статус авторизации: {is_authorized}")
+
+                    if is_authorized:
+                        logger.info("Клиент уже авторизован")
+                        return {
+                            "phone_code_hash": "already_authorized",
+                            "timeout": 60
+                        }
+                except Exception as e:
+                    logger.warning(f"Ошибка при проверке авторизации: {e}")
+
+                # Отправляем код
+                logger.info("Отправляем код подтверждения...")
+                sent_code = await temp_client.send_code(phone)
+                logger.info(f"Код успешно отправлен, phone_code_hash: {sent_code.phone_code_hash}")
+
+                return {
+                    "phone_code_hash": sent_code.phone_code_hash,
+                    "timeout": sent_code.timeout
+                }
+
+        except Exception as e:
+            logger.error(f"Ошибка при отправке кода: {e}")
+            logger.error(f"Тип ошибки: {type(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+
+    async def verify_code(self, code: str, phone_code_hash: str) -> None:
+        """Проверяет код подтверждения."""
+        try:
+            logger.info("Проверка кода подтверждения")
+
+            # Создаем новый клиент для этого запроса согласно документации
+            from telethon import TelegramClient
+            temp_client = TelegramClient(
+                self.client.session.filename,
+                self.api_id,
+                self.api_hash
+            )
+
+            # Используем контекстный менеджер согласно документации
+            async with temp_client:
+                logger.info("Временный клиент подключен для проверки кода")
+
+                # Проверяем код
+                await temp_client.sign_in(phone_code_hash=phone_code_hash, code=code)
+
+                # Проверяем авторизацию
+                if await temp_client.is_user_authorized():
+                    logger.info("Успешная авторизация!")
+                    self.is_connected = True
+                else:
+                    raise ValueError("Авторизация не удалась")
+
+        except Exception as e:
+            logger.error(f"Ошибка при проверке кода: {e}")
             raise
 
     async def _authorize_client(self) -> None:
@@ -435,7 +550,6 @@ class TelegramAnalyzer:
         
         # Форматируем сообщение
         message_data = {
-            "channel_id": channel_info.get("id"),
             "channel_title": channel_info.get("title"),
             "channel_username": channel_info.get("username"),
             "participants_count": channel_info.get("participants_count", 0),

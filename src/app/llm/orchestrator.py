@@ -64,7 +64,9 @@ class LLMOrchestrator:
         self,
         post_data: Dict[str, Any],
         rubric: Optional[Dict[str, Any]] = None,
-        reel_format: Optional[Dict[str, Any]] = None
+        reel_format: Optional[Dict[str, Any]] = None,
+        skip_filter: bool = False,
+        skip_analysis: bool = False
     ) -> OrchestratorResult:
         """
         Обрабатывает пост через все этапы: фильтрация → анализ → генерация.
@@ -85,61 +87,87 @@ class LLMOrchestrator:
         logger.info(f"Начинаем обработку поста {post_id}")
 
         try:
-            # Этап 1: Фильтрация
-            logger.info(f"Этап 1: Фильтрация поста {post_id}")
-            filter_result = await self.filter_processor.process(post_data)
+            # Этап 1: Фильтрация (если не пропускается)
+            filter_result = None
+            if not skip_filter:
+                logger.info(f"Этап 1: Фильтрация поста {post_id}")
+                filter_result = await self.filter_processor.process(post_data)
 
-            stages.append(ProcessingStage(
-                stage_name="filter",
-                success=filter_result.success,
-                data=filter_result.data,
-                error=filter_result.error,
-                tokens_used=filter_result.tokens_used,
-                processing_time=filter_result.processing_time
-            ))
+                stages.append(ProcessingStage(
+                    stage_name="filter",
+                    success=filter_result.success,
+                    data=filter_result.data,
+                    error=filter_result.error,
+                    tokens_used=filter_result.tokens_used,
+                    processing_time=filter_result.processing_time
+                ))
 
-            total_tokens += filter_result.tokens_used
+                total_tokens += filter_result.tokens_used
 
-            # Если фильтрация не прошла или пост не подходит
-            if not filter_result.success or not filter_result.data.get("suitable", False):
-                reason = filter_result.data.get("reason", "Не прошел фильтрацию") if filter_result.success else filter_result.error
+                # Если фильтрация не прошла или пост не подходит
+                if not filter_result.success or not filter_result.data.get("suitable", False):
+                    reason = filter_result.data.get("reason", "Не прошел фильтрацию") if filter_result.success else filter_result.error
 
-                return OrchestratorResult(
-                    post_id=post_id,
-                    overall_success=False,
-                    stages=stages,
-                    total_tokens=total_tokens,
-                    total_time=asyncio.get_event_loop().time() - start_time,
-                    error=f"Пост не прошел фильтрацию: {reason}"
-                )
+                    return OrchestratorResult(
+                        post_id=post_id,
+                        overall_success=False,
+                        stages=stages,
+                        total_tokens=total_tokens,
+                        total_time=asyncio.get_event_loop().time() - start_time,
+                        error=f"Пост не прошел фильтрацию: {reason}"
+                    )
+            else:
+                logger.info(f"Пропускаем фильтрацию для поста {post_id}")
+                # Создаем фиктивный успешный результат фильтрации
+                stages.append(ProcessingStage(
+                    stage_name="filter",
+                    success=True,
+                    data={"suitable": True, "score": 1.0, "reason": "Пропущено"},
+                    tokens_used=0,
+                    processing_time=0.0
+                ))
 
-            # Этап 2: Анализ причин успеха
-            logger.info(f"Этап 2: Анализ поста {post_id}")
-            analysis_result = await self.analysis_processor.process({
-                **post_data,
-                "filter_score": filter_result.data.get("score", 0)
-            })
+            # Этап 2: Анализ причин успеха (если не пропускается)
+            analysis_result = None
+            if not skip_analysis:
+                logger.info(f"Этап 2: Анализ поста {post_id}")
+                filter_score = filter_result.data.get("score", 0) if filter_result else 0
+                analysis_result = await self.analysis_processor.process({
+                    **post_data,
+                    "filter_score": filter_score
+                })
 
-            stages.append(ProcessingStage(
-                stage_name="analysis",
-                success=analysis_result.success,
-                data=analysis_result.data,
-                error=analysis_result.error,
-                tokens_used=analysis_result.tokens_used,
-                processing_time=analysis_result.processing_time
-            ))
+                stages.append(ProcessingStage(
+                    stage_name="analysis",
+                    success=analysis_result.success,
+                    data=analysis_result.data,
+                    error=analysis_result.error,
+                    tokens_used=analysis_result.tokens_used,
+                    processing_time=analysis_result.processing_time
+                ))
 
-            total_tokens += analysis_result.tokens_used
+                total_tokens += analysis_result.tokens_used
 
-            # Если анализ не удался, продолжаем без него
-            if not analysis_result.success:
-                logger.warning(f"Анализ поста {post_id} не удался: {analysis_result.error}")
+                # Если анализ не удался, продолжаем без него
+                if not analysis_result.success:
+                    logger.warning(f"Анализ поста {post_id} не удался: {analysis_result.error}")
+            else:
+                logger.info(f"Пропускаем анализ для поста {post_id}")
+                # Создаем фиктивный результат анализа
+                stages.append(ProcessingStage(
+                    stage_name="analysis",
+                    success=True,
+                    data={"skipped": True},
+                    tokens_used=0,
+                    processing_time=0.0
+                ))
 
             # Этап 3: Генерация сценария
             logger.info(f"Этап 3: Генерация сценария для поста {post_id}")
+            analysis_data = analysis_result.data if analysis_result and analysis_result.success else {}
             generator_input = {
                 **post_data,
-                "analysis": analysis_result.data if analysis_result.success else {},
+                "analysis": analysis_data,
                 "rubric": rubric or {},
                 "reel_format": reel_format or {}
             }
@@ -197,7 +225,9 @@ class LLMOrchestrator:
         posts: List[Dict[str, Any]],
         rubric: Optional[Dict[str, Any]] = None,
         reel_format: Optional[Dict[str, Any]] = None,
-        concurrency: int = 3
+        concurrency: int = 3,
+        skip_filter: bool = False,
+        skip_analysis: bool = False
     ) -> List[OrchestratorResult]:
         """
         Обрабатывает несколько постов параллельно.
@@ -207,6 +237,8 @@ class LLMOrchestrator:
             rubric: Рубрика для всех постов
             reel_format: Формат для всех постов
             concurrency: Максимальное количество одновременных обработок
+            skip_filter: Пропустить этап фильтрации (для предварительно отфильтрованных постов)
+            skip_analysis: Пропустить этап анализа (только генерация сценариев)
 
         Returns:
             Список результатов обработки
@@ -218,7 +250,7 @@ class LLMOrchestrator:
 
         async def process_with_semaphore(post_data):
             async with semaphore:
-                return await self.process_post(post_data, rubric, reel_format)
+                return await self.process_post(post_data, rubric, reel_format, skip_filter, skip_analysis)
 
         # Обрабатываем все посты параллельно
         tasks = [process_with_semaphore(post) for post in posts]

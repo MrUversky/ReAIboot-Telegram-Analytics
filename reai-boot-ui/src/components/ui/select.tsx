@@ -35,10 +35,10 @@ export function SelectTrigger({ children, className = '' }: SelectTriggerProps) 
   return (
     <button
       type="button"
-      className={`flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      className={`flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-50 dark:border-gray-300 dark:text-gray-900 dark:focus:ring-blue-500 ${className}`}
     >
       {children}
-      <ChevronDown className="h-4 w-4 opacity-50" />
+      <ChevronDown className="h-4 w-4 opacity-50 text-gray-500 dark:text-gray-400" />
     </button>
   )
 }
@@ -48,7 +48,7 @@ interface SelectValueProps {
 }
 
 export function SelectValue({ placeholder }: SelectValueProps) {
-  return <span className="text-gray-500">{placeholder}</span>
+  return <span className="text-gray-700 dark:text-gray-600">{placeholder}</span>
 }
 
 interface SelectContentProps {
@@ -57,7 +57,7 @@ interface SelectContentProps {
 
 export function SelectContent({ children }: SelectContentProps) {
   return (
-    <div className="absolute z-10 mt-1 max-h-60 min-w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 text-sm shadow-lg">
+    <div className="absolute z-10 mt-1 max-h-60 min-w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 text-sm text-gray-900 shadow-lg dark:bg-gray-50 dark:border-gray-300 dark:text-gray-900">
       {children}
     </div>
   )
@@ -71,7 +71,7 @@ interface SelectItemProps {
 export function SelectItem({ value, children }: SelectItemProps) {
   return (
     <div
-      className="relative cursor-pointer select-none px-3 py-2 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
+      className="relative cursor-pointer select-none px-3 py-2 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none dark:hover:bg-gray-200 dark:focus:bg-gray-200"
       data-value={value}
     >
       {children}

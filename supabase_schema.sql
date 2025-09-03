@@ -8,6 +8,38 @@
 CREATE TYPE post_status AS ENUM ('pending', 'processing', 'completed', 'failed');
 CREATE TYPE analysis_status AS ENUM ('pending', 'processing', 'completed', 'failed');
 CREATE TYPE user_role AS ENUM ('admin', 'user', 'viewer');
+CREATE TYPE channel_baseline_status AS ENUM ('learning', 'ready', 'outdated');
+
+-- SYSTEM SETTINGS TABLE
+CREATE TABLE public.system_settings (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL,
+    description TEXT,
+    category TEXT DEFAULT 'general',
+    is_editable BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- CHANNEL BASELINES TABLE
+CREATE TABLE public.channel_baselines (
+    channel_username TEXT PRIMARY KEY,
+    subscribers_count INTEGER,
+    posts_analyzed INTEGER DEFAULT 0,
+    avg_engagement_rate DECIMAL(5,4) DEFAULT 0,
+    median_engagement_rate DECIMAL(5,4) DEFAULT 0,
+    std_engagement_rate DECIMAL(5,4) DEFAULT 0,
+    p75_engagement_rate DECIMAL(5,4) DEFAULT 0,
+    p95_engagement_rate DECIMAL(5,4) DEFAULT 0,
+    max_engagement_rate DECIMAL(5,4) DEFAULT 0,
+    baseline_status channel_baseline_status DEFAULT 'learning',
+    calculation_period_days INTEGER DEFAULT 30,
+    min_posts_for_baseline INTEGER DEFAULT 10,
+    last_calculated TIMESTAMP WITH TIME ZONE,
+    next_calculation TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
 
 -- Users table (extends Supabase auth.users)
 CREATE TABLE public.profiles (
@@ -54,6 +86,14 @@ CREATE TABLE public.posts (
     media_urls TEXT[],
     permalink TEXT,
     raw_data JSONB,
+
+    -- Viral detection metrics
+    viral_score DECIMAL(5,2) DEFAULT 0,
+    engagement_rate DECIMAL(5,4) DEFAULT 0,
+    zscore DECIMAL(5,2) DEFAULT 0,
+    median_multiplier DECIMAL(5,2) DEFAULT 1,
+    last_viral_calculation TIMESTAMP WITH TIME ZONE,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
 
@@ -231,6 +271,8 @@ CREATE INDEX idx_token_usage_created ON public.token_usage(created_at DESC);
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.channels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_baselines ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.post_metrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.rubrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reel_formats ENABLE ROW LEVEL SECURITY;
@@ -277,6 +319,25 @@ CREATE POLICY "System can insert posts" ON public.posts
 
 CREATE POLICY "System can update posts" ON public.posts
     FOR UPDATE TO authenticated USING (true);
+
+--- System settings policies (only admins can modify)
+CREATE POLICY "Authenticated users can view system settings" ON public.system_settings
+    FOR SELECT TO authenticated USING (true);
+
+CREATE POLICY "Only admins can modify system settings" ON public.system_settings
+    FOR ALL TO authenticated USING (
+        EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE id = auth.uid() AND role = 'admin'
+        )
+    );
+
+--- Channel baselines policies (authenticated users can read, system can modify)
+CREATE POLICY "Authenticated users can view channel baselines" ON public.channel_baselines
+    FOR SELECT TO authenticated USING (true);
+
+CREATE POLICY "System can modify channel baselines" ON public.channel_baselines
+    FOR ALL TO authenticated WITH CHECK (true);
 
 -- Similar policies for other tables...
 -- (You can add more specific policies based on your security requirements)
@@ -380,3 +441,37 @@ CREATE TRIGGER update_post_analysis_updated_at BEFORE UPDATE ON public.post_anal
 
 CREATE TRIGGER update_scenarios_updated_at BEFORE UPDATE ON public.scenarios
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_system_settings_updated_at BEFORE UPDATE ON public.system_settings
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_channel_baselines_updated_at BEFORE UPDATE ON public.channel_baselines
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Initialize default system settings
+INSERT INTO public.system_settings (key, value, description, category) VALUES
+('viral_weights', '{
+  "forward_rate": 0.5,
+  "reaction_rate": 0.3,
+  "reply_rate": 0.2
+}', 'Веса для расчета engagement rate', 'viral_detection'),
+
+('viral_thresholds', '{
+  "min_viral_score": 1.5,
+  "min_zscore": 1.5,
+  "min_median_multiplier": 2.0,
+  "min_views_percentile": 0.001
+}', 'Пороги для определения "залетевших" постов', 'viral_detection'),
+
+('baseline_calculation', '{
+  "history_days": 30,
+  "min_posts_for_baseline": 10,
+  "outlier_removal_percentile": 95
+}', 'Настройки расчета базовых метрик каналов', 'baseline_calculation'),
+
+('channel_categories', '{
+  "small": {"max_subscribers": 10000, "viral_multiplier": 1.0},
+  "medium": {"max_subscribers": 100000, "viral_multiplier": 1.2},
+  "large": {"max_subscribers": 1000000, "viral_multiplier": 1.5}
+}', 'Категории каналов по размеру', 'channel_categories')
+ON CONFLICT (key) DO NOTHING;

@@ -1,49 +1,45 @@
 #!/usr/bin/env python3
-"""
-Простой тест CRUD операций
-"""
 
-import sys
+import asyncio
 import os
-sys.path.append('src')
+import sys
 
-from src.app.supabase_client import SupabaseManager
+# Добавляем src в путь
+sys.path.insert(0, 'src')
 
-def main():
-    print("🔧 ТЕСТ СУПАБЕЙС ПОСЛЕ ОТКЛЮЧЕНИЯ RLS")
-    print("=" * 50)
+# Устанавливаем переменные окружения
+os.environ['TELEGRAM_API_ID'] = '22287918'
+os.environ['TELEGRAM_API_HASH'] = 'bfb2c1383584f7bf73ec27f1341d1891'
+os.environ['TELEGRAM_SESSION'] = 'telegram_session'
 
+async def simple_test():
     try:
-        manager = SupabaseManager()
+        print("=== SIMPLE TELEGRAM TEST ===")
 
-        # Тест создания канала
-        print("1. Создание канала...")
-        result = manager.upsert_channel('@test123', 'Тест канал', 'Тест')
-        print(f"   Создание: {'✅' if result else '❌'}")
+        from src.app.telegram_client import TelegramAnalyzer
+        print("1. Импорт успешен")
 
-        # Тест получения каналов
-        print("2. Получение каналов...")
-        channels = manager.get_channels()
-        print(f"   Каналов найдено: {len(channels)}")
+        analyzer = TelegramAnalyzer()
+        print("2. Создание analyzer успешно")
 
-        # Тест обновления (если есть каналы)
-        if channels:
-            print("3. Обновление канала...")
-            channel_id = channels[0]['id']
-            update_result = manager.update_channel(str(channel_id), {'title': 'Обновленный'})
-            print(f"   Обновление: {'✅' if update_result else '❌'}")
+        # Проверяем сессию
+        needs_auth = await analyzer.needs_authorization()
+        print(f"3. Needs auth: {needs_auth}")
 
-            print("4. Удаление канала...")
-            delete_result = manager.delete_channel(str(channel_id))
-            print(f"   Удаление: {'✅' if delete_result else '❌'}")
+        # Проверяем подключение
+        if not needs_auth:
+            await analyzer.connect()
+            print("4. Подключение успешно")
+        else:
+            print("4. Авторизация нужна - пробуем send_code")
 
-        print("\n✅ ТЕСТ ЗАВЕРШЕН!")
-        print("Если все операции успешны - RLS отключен правильно")
+            result = await analyzer.send_code('+79001234567')
+            print(f"5. Send code result: {result}")
 
     except Exception as e:
-        print(f"\n❌ ОШИБКА: {e}")
-        print("RLS все еще активен или проблема с подключением")
+        print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
-    main()
-
+    asyncio.run(simple_test())
