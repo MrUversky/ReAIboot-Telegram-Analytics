@@ -16,7 +16,7 @@ import logging
 from .app.llm.orchestrator import LLMOrchestrator
 from .app.prompts import prompt_manager
 from .app.settings import settings
-# Импорт TelegramAnalyzer будет сделан ниже с обработкой ошибок
+from .app.telegram_client import TelegramAnalyzer
 from .app.supabase_client import SupabaseManager
 
 # Настройка логирования
@@ -54,7 +54,6 @@ async def init_telegram():
     global telegram_analyzer, telegram_available, telegram_authorization_needed
 
     try:
-        from .app.telegram_client import TelegramAnalyzer
         telegram_analyzer = TelegramAnalyzer()
 
         # Проверяем, нужна ли авторизация
@@ -340,7 +339,7 @@ async def verify_telegram_code(code_data: Dict[str, str]):
         try:
             # Проверяем код с тем же клиентом
             logger.info(f"Проверяем код: {code}")
-            await auth_client.sign_in(phone_code_hash, code)
+            await auth_client.sign_in(phone_code_hash=phone_code_hash, code=code)
 
             # Проверяем авторизацию
             if await auth_client.is_user_authorized():
@@ -352,7 +351,9 @@ async def verify_telegram_code(code_data: Dict[str, str]):
                 global telegram_analyzer
                 if telegram_analyzer:
                     await telegram_analyzer.disconnect()
-                telegram_analyzer = auth_client
+
+                # Создаем новый TelegramAnalyzer с авторизованной сессией
+                telegram_analyzer = TelegramAnalyzer()
                 auth_client = None  # Очищаем временную переменную
 
                 return {
@@ -1038,6 +1039,16 @@ async def parse_channels_bulk_background(channels: List[str], days_back: int, ma
 
         total_posts = 0
 
+        # Подключаемся к Telegram один раз в начале
+        telegram_connected = False
+        if telegram_available and telegram_analyzer:
+            try:
+                await telegram_analyzer.connect()
+                telegram_connected = True
+                logger.info("Успешно подключено к Telegram для массового парсинга")
+            except Exception as e:
+                logger.warning(f"Не удалось подключиться к Telegram: {e}")
+
         for channel_username in channels:
             try:
                 logger.info(f"Парсинг канала {channel_username}")
@@ -1045,10 +1056,8 @@ async def parse_channels_bulk_background(channels: List[str], days_back: int, ma
                 posts = []
                 channel_info = {}
 
-                if telegram_available and telegram_analyzer:
+                if telegram_connected:
                     try:
-                        await telegram_analyzer.connect()
-
                         posts, channel_info = await telegram_analyzer.get_channel_posts(
                             channel_username=channel_username,
                             days_back=days_back,
@@ -1071,6 +1080,14 @@ async def parse_channels_bulk_background(channels: List[str], days_back: int, ma
 
             except Exception as e:
                 logger.error(f"Ошибка парсинга канала {channel_username}: {e}")
+
+        # Отключаемся от Telegram после завершения
+        if telegram_connected and telegram_analyzer:
+            try:
+                await telegram_analyzer.disconnect()
+                logger.info("Отключено от Telegram после массового парсинга")
+            except Exception as e:
+                logger.warning(f"Ошибка при отключении от Telegram: {e}")
 
         # Обновляем сессию
         supabase_manager.update_parsing_session(session_id, {
