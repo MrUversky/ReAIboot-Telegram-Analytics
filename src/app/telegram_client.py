@@ -133,7 +133,7 @@ class TelegramAnalyzer:
             # Создаем новый клиент для этого запроса согласно документации
             from telethon import TelegramClient
             temp_client = TelegramClient(
-                self.client.session.filename,
+                f"{self.client.session.filename}_auth",  # Уникальное имя сессии для авторизации
                 self.api_id,
                 self.api_hash
             )
@@ -181,7 +181,7 @@ class TelegramAnalyzer:
             # Создаем новый клиент для этого запроса согласно документации
             from telethon import TelegramClient
             temp_client = TelegramClient(
-                self.client.session.filename,
+                f"{self.client.session.filename}_auth",  # То же уникальное имя сессии
                 self.api_id,
                 self.api_hash
             )

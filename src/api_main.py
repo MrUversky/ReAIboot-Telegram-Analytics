@@ -352,6 +352,11 @@ async def verify_telegram_code(code_data: Dict[str, str]):
                 if telegram_analyzer:
                     await telegram_analyzer.disconnect()
 
+                # Отключаем auth_client и ждем завершения
+                if auth_client:
+                    await auth_client.disconnect()
+                    await asyncio.sleep(2)  # Ждем освобождения сессионного файла
+
                 # Создаем новый TelegramAnalyzer с авторизованной сессией
                 telegram_analyzer = TelegramAnalyzer()
                 auth_client = None  # Очищаем временную переменную
