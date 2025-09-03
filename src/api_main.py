@@ -617,16 +617,45 @@ async def update_system_setting(key: str, value: Any, description: Optional[str]
 async def get_channel_baselines():
     """Получить базовые метрики всех каналов."""
     try:
-        # Получаем все каналы с базовыми метриками
+        # Получаем все каналы
         channels = supabase_manager.client.table('channels').select('*').execute()
         baselines = []
 
         for channel in channels.data:
             baseline = supabase_manager.get_channel_baseline(channel['username'])
             if baseline:
+                # Канал с рассчитанными метриками
                 baselines.append({
                     'channel': channel,
                     'baseline': baseline
+                })
+            else:
+                # Канал без метрик - подсчитываем реальное количество постов
+                try:
+                    from .app.supabase_client import supabase_client
+                    posts_count = supabase_manager.client.table('posts').select('id', count='exact').eq('channel_username', channel['username']).execute()
+                    actual_posts_count = posts_count.count if hasattr(posts_count, 'count') else 0
+                except Exception as e:
+                    logger.warning(f"Не удалось подсчитать посты для канала {channel['username']}: {e}")
+                    actual_posts_count = 0
+
+                baselines.append({
+                    'channel': channel,
+                    'baseline': {
+                        'channel_username': channel['username'],
+                        'baseline_status': 'not_calculated',
+                        'posts_analyzed': actual_posts_count,  # Реальное количество постов
+                        'median_engagement_rate': 0,
+                        'std_engagement_rate': 0,
+                        'avg_engagement_rate': 0,
+                        'p75_engagement_rate': 0,
+                        'p95_engagement_rate': 0,
+                        'max_engagement_rate': 0,
+                        'calculation_period_days': 30,
+                        'min_posts_for_baseline': 10,
+                        'last_calculated': None,
+                        'next_calculation': None
+                    }
                 })
 
         return {"baselines": baselines}
@@ -687,7 +716,102 @@ async def update_all_channel_baselines():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка обновления базовых метрик: {str(e)}")
 
+@app.post("/api/channels/baselines/recalculate-all", tags=["channels"])
+async def recalculate_all_baselines():
+    """Принудительно пересчитать базовые метрики для ВСЕХ каналов."""
+    try:
+        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        import json
+
+        analyzer = ChannelBaselineAnalyzer(supabase_manager)
+
+        # Получаем все уникальные каналы из постов
+        channels_result = supabase_manager.client.table('posts').select('channel_username').execute()
+        unique_channels = list(set(post['channel_username'] for post in channels_result.data))
+
+        logger.info(f"🔄 Начинаем принудительный пересчет для {len(unique_channels)} каналов")
+
+        recalculated_count = 0
+        failed_count = 0
+        results = []
+
+        for channel_username in unique_channels:
+            try:
+                logger.info(f"📊 Пересчитываем базовые метрики для {channel_username}")
+
+                # Принудительно пересчитываем
+                baseline = analyzer.calculate_channel_baseline(channel_username)
+                if baseline:
+                    analyzer.save_channel_baseline(baseline)
+                    recalculated_count += 1
+                    results.append({
+                        "channel": channel_username,
+                        "status": "success",
+                        "posts_analyzed": baseline.posts_analyzed,
+                        "median_engagement": float(baseline.median_engagement_rate),
+                        "std_engagement": float(baseline.std_engagement_rate)
+                    })
+                    logger.info(f"✅ Пересчитано для {channel_username}: {baseline.posts_analyzed} постов")
+                else:
+                    failed_count += 1
+                    results.append({
+                        "channel": channel_username,
+                        "status": "failed",
+                        "reason": "Недостаточно данных"
+                    })
+                    logger.warning(f"❌ Недостаточно данных для {channel_username}")
+
+            except Exception as e:
+                failed_count += 1
+                results.append({
+                    "channel": channel_username,
+                    "status": "error",
+                    "reason": str(e)
+                })
+                logger.error(f"❌ Ошибка для {channel_username}: {e}")
+
+        logger.info(f"🎉 Пересчет завершен: {recalculated_count} успешно, {failed_count} неудачно")
+
+        return {
+            "success": True,
+            "total_channels": len(unique_channels),
+            "recalculated": recalculated_count,
+            "failed": failed_count,
+            "results": results
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при массовом пересчете: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка пересчета: {str(e)}")
+
 # Viral посты
+
+@app.get("/api/posts", tags=["posts"])
+async def get_posts(limit: int = 100, offset: int = 0, channel_username: Optional[str] = None):
+    """Получить посты с метриками."""
+    try:
+        query = supabase_manager.client.table('posts').select('*')
+
+        if channel_username:
+            query = query.eq('channel_username', channel_username)
+
+        posts_result = query.order('date', desc=True).range(offset, offset + limit - 1).execute()
+        posts = posts_result.data or []
+
+        # Добавляем метрики виральности к постам
+        for post in posts:
+            if 'viral_score' not in post or post['viral_score'] is None:
+                post['viral_score'] = 0
+            if 'engagement_rate' not in post or post['engagement_rate'] is None:
+                post['engagement_rate'] = 0
+            if 'zscore' not in post or post['zscore'] is None:
+                post['zscore'] = 0
+            if 'median_multiplier' not in post or post['median_multiplier'] is None:
+                post['median_multiplier'] = 0
+
+        return {"posts": posts, "count": len(posts)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения постов: {str(e)}")
 
 @app.get("/api/posts/viral", tags=["posts"])
 async def get_viral_posts(channel_username: Optional[str] = None,
@@ -698,6 +822,401 @@ async def get_viral_posts(channel_username: Optional[str] = None,
         return {"posts": posts, "count": len(posts)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка получения viral постов: {str(e)}")
+
+@app.post("/api/debug/calculate-baseline", tags=["debug"])
+async def debug_calculate_baseline(channel_username: str):
+    """Отладка: рассчитать базовые метрики канала."""
+    try:
+        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        import json
+
+        logger.info(f"🔍 Начинаем отладку расчета базовых метрик для канала {channel_username}")
+
+        analyzer = ChannelBaselineAnalyzer(supabase_manager)
+
+        # Получаем посты канала
+        posts_result = supabase_manager.client.table('posts').select('*').eq('channel_username', channel_username).execute()
+        posts = posts_result.data or []
+
+        logger.info(f"📊 Найдено {len(posts)} постов для канала {channel_username}")
+
+        if not posts:
+            return {"error": f"Нет постов для канала {channel_username}"}
+
+        # Рассчитываем engagement rates
+        engagement_rates = []
+        posts_info = []
+
+        for post in posts:
+            rate = analyzer._calculate_post_engagement_rate(post)
+            engagement_rates.append(rate)
+
+            posts_info.append({
+                "id": post.get('id'),
+                "date": post.get('date'),
+                "views": post.get('views', 0),
+                "forwards": post.get('forwards', 0),
+                "replies": post.get('replies', 0),
+                "reactions": post.get('reactions', 0),
+                "engagement_rate": rate
+            })
+
+        valid_rates = [r for r in engagement_rates if r is not None]
+        logger.info(f"📈 Рассчитано {len(valid_rates)} engagement rates из {len(posts)} постов")
+
+        # Проверяем минимальное количество (используем настройки с минимумом 3)
+        min_from_settings = analyzer.settings['baseline_calculation'].get('min_posts_for_baseline', 5)
+        min_posts = max(min_from_settings, 3)
+        if len(valid_rates) < min_posts:
+            return {
+                "error": f"Недостаточно данных: {len(valid_rates)} < {min_posts}",
+                "posts": posts_info,
+                "valid_rates_count": len(valid_rates),
+                "min_required": min_posts
+            }
+
+        # Удаляем выбросы
+        clean_rates = analyzer._remove_outliers(valid_rates)
+        logger.info(f"🧹 После удаления выбросов: {len(clean_rates)} из {len(valid_rates)}")
+
+        if len(clean_rates) < min_posts:
+            return {
+                "error": f"После удаления выбросов недостаточно данных: {len(clean_rates)} < {min_posts}",
+                "posts": posts_info,
+                "valid_rates": valid_rates,
+                "clean_rates": clean_rates,
+                "min_required": min_posts
+            }
+
+        # Рассчитываем базовые метрики
+        baseline = analyzer._calculate_baseline_stats(channel_username, clean_rates, len(posts))
+
+        return {
+            "success": True,
+            "channel": channel_username,
+            "posts_count": len(posts),
+            "valid_rates_count": len(valid_rates),
+            "clean_rates_count": len(clean_rates),
+            "baseline": {
+                "median": baseline.median_engagement_rate,
+                "std": baseline.std_engagement_rate,
+                "avg": baseline.avg_engagement_rate,
+                "posts_analyzed": baseline.posts_analyzed
+            },
+            "posts_info": posts_info[:5]  # Первые 5 постов
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при отладке базовых метрик для {channel_username}: {e}")
+        return {"error": str(e)}
+
+@app.get("/api/debug/settings", tags=["debug"])
+async def debug_get_settings():
+    """Отладка: получить все настройки системы."""
+    try:
+        settings = {}
+        keys = ['viral_weights', 'baseline_calculation', 'viral_thresholds']
+        for key in keys:
+            value = supabase_manager.get_system_setting(key)
+            settings[key] = value
+
+        return {"success": True, "settings": settings}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/debug/calculate-viral-single", tags=["debug"])
+async def debug_calculate_single_post(post_id: str):
+    """Отладка: рассчитать виральность одного поста."""
+    try:
+        from .app.viral_post_detector import ViralPostDetector
+        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        import json
+
+        # Получаем данные поста
+        post_result = supabase_manager.client.table('posts').select('*').eq('id', post_id).execute()
+        if not post_result.data:
+            raise HTTPException(status_code=404, detail=f"Пост {post_id} не найден")
+
+        post = post_result.data[0]
+        channel_username = post['channel_username']
+
+        logger.info(f"📊 Пост найден: {post_id} из канала {channel_username}")
+        logger.info(f"📈 Статистика поста: views={post.get('views', 0)}, forwards={post.get('forwards', 0)}, replies={post.get('replies', 0)}, reactions={post.get('reactions', 0)}")
+        logger.info(f"📝 Post data: {post}")
+
+        # Получаем базовые метрики канала
+        baseline_analyzer = ChannelBaselineAnalyzer(supabase_manager)
+        baseline = baseline_analyzer.get_channel_baseline(channel_username)
+
+        if not baseline:
+            logger.warning(f"⚠️  Нет базовых метрик для канала {channel_username}")
+            # Попробуем рассчитать
+            baseline = baseline_analyzer.calculate_channel_baseline(channel_username)
+            if baseline:
+                baseline_analyzer.save_channel_baseline(baseline)
+                logger.info(f"✅ Базовые метрики рассчитаны для канала {channel_username}")
+            else:
+                raise HTTPException(status_code=404, detail=f"Не удалось рассчитать базовые метрики для канала {channel_username}")
+
+        logger.info(f"📊 Базовые метрики канала: median={baseline.median_engagement_rate}, std={baseline.std_engagement_rate}")
+
+        # ДОБАВЛЯЕМ ОТЛАДКУ: проверяем supabase_manager
+        logger.info(f"🔧 supabase_manager: {supabase_manager}")
+        logger.info(f"🔧 supabase_manager.client: {supabase_manager.client}")
+
+        # ДОБАВЛЯЕМ ОТЛАДКУ: проверяем настройки
+        logger.info(f"🔧 Настройки baseline_analyzer: {baseline_analyzer.settings}")
+        viral_weights = baseline_analyzer.settings.get('viral_weights')
+        logger.info(f"🔧 Viral weights: {viral_weights} (тип: {type(viral_weights)})")
+
+        # Проверяем парсинг
+        if isinstance(viral_weights, str):
+            try:
+                import json
+                parsed_weights = json.loads(viral_weights)
+                logger.info(f"🔧 Parsed viral weights: {parsed_weights}")
+                # Проверяем расчет
+                test_calc = baseline_analyzer._calculate_post_engagement_rate(post)
+                logger.info(f"🔧 Test calculation result: {test_calc}")
+            except Exception as e:
+                logger.error(f"🔧 Parse error: {e}")
+        else:
+            logger.info(f"🔧 Viral weights already parsed: {viral_weights}")
+            # Проверяем расчет
+            test_calc = baseline_analyzer._calculate_post_engagement_rate(post)
+            logger.info(f"🔧 Test calculation result: {test_calc}")
+
+        # Рассчитываем виральность
+        detector = ViralPostDetector(baseline_analyzer)
+        viral_results = detector.detect_viral_posts([post], channel_username)
+
+        if viral_results:
+            result = viral_results[0]
+            logger.info(f"🎯 Результат расчета: viral_score={result.viral_score}, engagement_rate={result.engagement_rate}, zscore={result.zscore}, is_viral={result.is_viral}")
+
+            # Сохраняем результат
+            success = detector.update_post_viral_metrics(post_id, result)
+            logger.info(f"💾 Сохранение метрик: {'✅' if success else '❌'}")
+
+            return {
+                "success": True,
+                "post_id": post_id,
+                "channel": channel_username,
+                "baseline": {
+                    "median": baseline.median_engagement_rate,
+                    "std": baseline.std_engagement_rate,
+                    "posts_analyzed": baseline.posts_analyzed
+                },
+                "metrics": {
+                    "viral_score": result.viral_score,
+                    "engagement_rate": result.engagement_rate,
+                    "zscore": result.zscore,
+                    "median_multiplier": result.median_multiplier,
+                    "is_viral": result.is_viral
+                },
+                "post_stats": {
+                    "views": post.get('views', 0),
+                    "forwards": post.get('forwards', 0),
+                    "replies": post.get('replies', 0),
+                    "reactions": post.get('reactions', 0)
+                }
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Не удалось рассчитать виральность")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при расчете виральности поста {post_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка расчета: {str(e)}")
+
+@app.post("/api/posts/calculate-viral-batch", tags=["posts"])
+async def calculate_viral_batch(channel_username: str = None, limit: int = 100):
+    """Массовый расчет виральности постов."""
+    try:
+        from .app.viral_post_detector import ViralPostDetector
+        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        import json
+
+        logger.info(f"🚀 Начинаем массовый расчет виральности. Канал: {channel_username}, Лимит: {limit}")
+
+        # Получаем посты
+        query = supabase_manager.client.table('posts').select('*').order('date', desc=True).limit(limit)
+        if channel_username:
+            query = query.eq('channel_username', channel_username)
+
+        posts_result = query.execute()
+        posts = posts_result.data or []
+
+        if not posts:
+            return {"success": False, "message": "Нет постов для обработки"}
+
+        logger.info(f"📋 Найдено {len(posts)} постов для обработки")
+
+        # Группируем по каналам
+        channels_posts = {}
+        for post in posts:
+            channel = post['channel_username']
+            if channel not in channels_posts:
+                channels_posts[channel] = []
+            channels_posts[channel].append(post)
+
+        total_processed = 0
+        channels_stats = []
+
+        # Обрабатываем каждый канал
+        for channel, channel_posts in channels_posts.items():
+            logger.info(f"🔄 Обрабатываем канал {channel}: {len(channel_posts)} постов")
+
+            # Проверяем базовые метрики канала
+            baseline_analyzer = ChannelBaselineAnalyzer(supabase_manager)
+            baseline = baseline_analyzer.get_channel_baseline(channel)
+
+            if not baseline:
+                logger.info(f"📊 Рассчитываем базовые метрики для канала {channel}")
+                baseline = baseline_analyzer.calculate_channel_baseline(channel)
+                if baseline:
+                    baseline_analyzer.save_channel_baseline(baseline)
+                    logger.info(f"✅ Базовые метрики сохранены для канала {channel}")
+                else:
+                    logger.warning(f"⚠️  Не удалось рассчитать базовые метрики для канала {channel}")
+                    continue
+
+            # Рассчитываем виральность постов канала
+            detector = ViralPostDetector(baseline_analyzer)
+            viral_results = detector.detect_viral_posts(channel_posts, channel)
+
+            # Сохраняем результаты
+            processed_count = 0
+            viral_count = 0
+
+            for post, result in zip(channel_posts, viral_results):
+                post_id = post.get('id')
+                if post_id:
+                    success = detector.update_post_viral_metrics(str(post_id), result)
+                    if success:
+                        processed_count += 1
+                        if result.is_viral:
+                            viral_count += 1
+
+            logger.info(f"📊 Канал {channel}: обработано {processed_count}/{len(channel_posts)} постов, найдено {viral_count} виральных")
+
+            channels_stats.append({
+                "channel": channel,
+                "total_posts": len(channel_posts),
+                "processed_posts": processed_count,
+                "viral_posts": viral_count,
+                "baseline_status": "ready" if baseline else "failed"
+            })
+
+            total_processed += processed_count
+
+        logger.info(f"🎉 Массовый расчет завершен: обработано {total_processed} постов из {len(posts)}")
+
+        return {
+            "success": True,
+            "total_posts": len(posts),
+            "processed_posts": total_processed,
+            "channels": channels_stats
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при массовом расчете виральности: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка расчета: {str(e)}")
+
+@app.post("/api/posts/calculate-viral-all", tags=["posts"])
+async def calculate_viral_all_posts(channel_username: str = None):
+    """Массовый расчет виральности для ВСЕХ постов."""
+    try:
+        from .app.viral_post_detector import ViralPostDetector
+        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        import json
+
+        logger.info(f"🚀 Начинаем массовый расчет виральности для ВСЕХ постов. Канал: {channel_username}")
+
+        # Получаем все посты (без лимита)
+        query = supabase_manager.client.table('posts').select('*', count='exact').order('date', desc=True)
+        if channel_username:
+            query = query.eq('channel_username', channel_username)
+
+        posts_result = query.execute()
+        posts = posts_result.data or []
+        total_posts = posts_result.count
+
+        if not posts:
+            return {"success": False, "message": "Нет постов для обработки"}
+
+        logger.info(f"📋 Найдено {len(posts)} постов из {total_posts} для обработки")
+
+        # Группируем по каналам
+        channels_posts = {}
+        for post in posts:
+            channel = post['channel_username']
+            if channel not in channels_posts:
+                channels_posts[channel] = []
+            channels_posts[channel].append(post)
+
+        total_processed = 0
+        channels_stats = []
+
+        # Обрабатываем каждый канал
+        for channel, channel_posts in channels_posts.items():
+            logger.info(f"🔄 Обрабатываем канал {channel}: {len(channel_posts)} постов")
+
+            # Проверяем базовые метрики канала
+            baseline_analyzer = ChannelBaselineAnalyzer(supabase_manager)
+            baseline = baseline_analyzer.get_channel_baseline(channel)
+
+            if not baseline:
+                logger.info(f"📊 Рассчитываем базовые метрики для канала {channel}")
+                baseline = baseline_analyzer.calculate_channel_baseline(channel)
+                if baseline:
+                    baseline_analyzer.save_channel_baseline(baseline)
+                    logger.info(f"✅ Базовые метрики сохранены для канала {channel}")
+                else:
+                    logger.warning(f"⚠️  Не удалось рассчитать базовые метрики для канала {channel}")
+                    continue
+
+            # Рассчитываем виральность постов канала
+            detector = ViralPostDetector(baseline_analyzer)
+            viral_results = detector.detect_viral_posts(channel_posts, channel)
+
+            # Сохраняем результаты
+            processed_count = 0
+            viral_count = 0
+
+            for post, result in zip(channel_posts, viral_results):
+                post_id = post.get('id')
+                if post_id:
+                    success = detector.update_post_viral_metrics(str(post_id), result)
+                    if success:
+                        processed_count += 1
+                        if result.is_viral:
+                            viral_count += 1
+
+            logger.info(f"📊 Канал {channel}: обработано {processed_count}/{len(channel_posts)} постов, найдено {viral_count} виральных")
+
+            channels_stats.append({
+                "channel": channel,
+                "total_posts": len(channel_posts),
+                "processed_posts": processed_count,
+                "viral_posts": viral_count,
+                "baseline_status": "ready" if baseline else "failed"
+            })
+
+            total_processed += processed_count
+
+        logger.info(f"🎉 Массовый расчет всех постов завершен: обработано {total_processed} постов из {len(posts)}")
+
+        return {
+            "success": True,
+            "total_posts": len(posts),
+            "processed_posts": total_processed,
+            "channels": channels_stats,
+            "message": f"Обработано {total_processed} постов из {len(posts)}"
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при массовом расчете всех постов: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка расчета: {str(e)}")
 
 @app.post("/api/posts/{post_id}/viral/update", tags=["posts"])
 async def update_post_viral_metrics(post_id: str):
@@ -735,6 +1254,120 @@ async def update_post_viral_metrics(post_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка обновления viral метрик: {str(e)}")
+
+# ===== ДОПОЛНИТЕЛЬНЫЕ API ЭНДПОИНТЫ ДЛЯ VIRAL DETECTION =====
+
+@app.post("/api/posts/calculate-viral-batch", tags=["posts"])
+async def calculate_viral_metrics_batch(channel_username: str = None, limit: int = 100):
+    """Пересчитать viral метрики для группы постов."""
+    try:
+        from .app.viral_post_detector import ViralPostDetector
+        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+
+        # Получаем посты
+        query = supabase_manager.client.table('posts').select('*')
+        if channel_username:
+            query = query.eq('channel_username', channel_username)
+        query = query.is_('viral_score', None).limit(limit)  # Только посты без метрик
+
+        posts_result = query.execute()
+        posts = posts_result.data
+
+        if not posts:
+            return {"message": "Нет постов для расчета метрик", "processed": 0}
+
+        # Группируем по каналам
+        channels_processed = {}
+        total_processed = 0
+
+        for post in posts:
+            channel_username = post['channel_username']
+            if channel_username not in channels_processed:
+                # Получаем базовые метрики канала
+                baseline_analyzer = ChannelBaselineAnalyzer(supabase_manager)
+                baseline = baseline_analyzer.get_channel_baseline(channel_username)
+
+                if not baseline:
+                    # Пытаемся рассчитать базовые метрики
+                    baseline = baseline_analyzer.calculate_channel_baseline(channel_username)
+                    if baseline:
+                        baseline_analyzer.save_channel_baseline(baseline)
+
+                channels_processed[channel_username] = baseline
+
+            baseline = channels_processed[channel_username]
+            if not baseline:
+                continue
+
+            # Рассчитываем метрики виральности
+            detector = ViralPostDetector(baseline_analyzer)
+            result = detector.analyze_post_virality(post, baseline)
+
+            # Обновляем метрики
+            success = detector.update_post_viral_metrics(post['id'], result)
+            if success:
+                total_processed += 1
+
+        return {
+            "message": f"Обработано {total_processed} постов",
+            "processed": total_processed,
+            "channels": list(channels_processed.keys())
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка расчета метрик: {str(e)}")
+
+@app.post("/api/channels/{channel_username}/ensure-baseline", tags=["channels"])
+async def ensure_channel_baseline(channel_username: str, force_recalculate: bool = False):
+    """Убедиться, что базовые метрики канала существуют и актуальны."""
+    try:
+        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+
+        analyzer = ChannelBaselineAnalyzer(supabase_manager)
+
+        # Проверяем существующие метрики
+        existing_baseline = analyzer.get_channel_baseline(channel_username)
+
+        if existing_baseline and not force_recalculate:
+            # Проверяем актуальность
+            if existing_baseline.baseline_status == 'ready':
+                return {
+                    "message": "Базовые метрики актуальны",
+                    "baseline": existing_baseline.to_dict(),
+                    "status": "exists"
+                }
+
+        # Рассчитываем новые метрики
+        baseline = analyzer.calculate_channel_baseline(channel_username)
+
+        if not baseline:
+            # Если недостаточно данных, получаем больше постов
+            posts = analyzer._get_channel_posts_history(channel_username)
+            if len(posts) < 5:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Недостаточно данных для канала {channel_username}. Найдено всего {len(posts)} постов"
+                )
+
+            # Пытаемся с меньшим порогом
+            baseline = analyzer.calculate_channel_baseline(channel_username)
+
+        if baseline:
+            success = analyzer.save_channel_baseline(baseline)
+            if success:
+                return {
+                    "message": "Базовые метрики рассчитаны и сохранены",
+                    "baseline": baseline.to_dict(),
+                    "status": "created"
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Не удалось сохранить базовые метрики")
+        else:
+            raise HTTPException(status_code=400, detail="Не удалось рассчитать базовые метрики")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при работе с базовыми метриками: {str(e)}")
 
 # Статистика и метрики
 
@@ -1017,6 +1650,57 @@ async def parse_channel_background(channel_username: str, days_back: int, max_po
         if save_to_db and posts:
             supabase_manager.save_posts_batch(posts, channel_username, channel_info)
 
+            # Автоматический расчет метрик виральности
+            try:
+                viral_calc_settings = supabase_manager.get_system_setting('viral_calculation') or {
+                    'auto_calculate_viral': True,
+                    'batch_size': 100
+                }
+
+                if viral_calc_settings.get('auto_calculate_viral', True):
+                    logger.info(f"Автоматический расчет метрик виральности для {len(posts)} постов канала {channel_username}")
+
+                    # Импортируем необходимые классы
+                    from .app.viral_post_detector import ViralPostDetector
+                    from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+
+                    # Проверяем/создаем базовые метрики канала
+                    baseline_analyzer = ChannelBaselineAnalyzer(supabase_manager)
+                    baseline = baseline_analyzer.get_channel_baseline(channel_username)
+
+                    if not baseline:
+                        logger.info(f"Базовые метрики для канала {channel_username} не найдены, рассчитываем...")
+                        baseline = baseline_analyzer.calculate_channel_baseline(channel_username)
+                        if baseline:
+                            baseline_analyzer.save_channel_baseline(baseline)
+                            logger.info(f"Базовые метрики для канала {channel_username} рассчитаны")
+                        else:
+                            logger.warning(f"Не удалось рассчитать базовые метрики для канала {channel_username}")
+
+                    if baseline:
+                        # Рассчитываем метрики виральности
+                        detector = ViralPostDetector(baseline_analyzer)
+                        viral_results = detector.detect_viral_posts(posts, channel_username)
+
+                        processed_count = 0
+                        for post, result in zip(posts, viral_results):
+                            # Проверяем наличие ID поста
+                            post_id = post.get('id')
+                            if post_id:
+                                if detector.update_post_viral_metrics(str(post_id), result):
+                                    processed_count += 1
+                            else:
+                                logger.warning(f"Пост без ID пропущен: {post.get('message_id', 'unknown')} в канале {channel_username}")
+
+                        logger.info(f"Рассчитаны метрики виральности для {processed_count}/{len(posts)} постов канала {channel_username}")
+
+                        viral_count = sum(1 for r in viral_results if r.is_viral)
+                        if viral_count > 0:
+                            logger.info(f"Найдено {viral_count} 'залетевших' постов в канале {channel_username}")
+
+            except Exception as e:
+                logger.error(f"Ошибка при автоматическом расчете метрик для канала {channel_username}: {e}")
+
         # Обновляем сессию парсинга
         supabase_manager.update_parsing_session(session_id, {
             'status': 'completed',
@@ -1079,6 +1763,50 @@ async def parse_channels_bulk_background(channels: List[str], days_back: int, ma
 
                 if save_to_db and posts:
                     supabase_manager.save_posts_batch(posts, channel_username, channel_info)
+
+                    # Обновляем время последнего парсинга канала
+                    supabase_manager.update_channel_last_parsed(channel_username)
+                    logger.info(f"Обновлено время последнего парсинга для канала {channel_username}")
+
+                    # Автоматический расчет метрик виральности для канала
+                    try:
+                        viral_calc_settings = supabase_manager.get_system_setting('viral_calculation') or {
+                            'auto_calculate_viral': True
+                        }
+
+                        if viral_calc_settings.get('auto_calculate_viral', True):
+                            logger.info(f"Автоматический расчет метрик для канала {channel_username}")
+
+                            from .app.viral_post_detector import ViralPostDetector
+                            from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+
+                            baseline_analyzer = ChannelBaselineAnalyzer(supabase_manager)
+                            baseline = baseline_analyzer.get_channel_baseline(channel_username)
+
+                            if not baseline:
+                                baseline = baseline_analyzer.calculate_channel_baseline(channel_username)
+                                if baseline:
+                                    baseline_analyzer.save_channel_baseline(baseline)
+
+                            if baseline:
+                                detector = ViralPostDetector(baseline_analyzer)
+                                viral_results = detector.detect_viral_posts(posts, channel_username)
+
+                                processed_count = 0
+                                for post, result in zip(posts, viral_results):
+                                    # Проверяем наличие ID поста
+                                    post_id = post.get('id')
+                                    if post_id:
+                                        if detector.update_post_viral_metrics(str(post_id), result):
+                                            processed_count += 1
+                                    else:
+                                        logger.warning(f"Пост без ID пропущен: {post.get('message_id', 'unknown')} в канале {channel_username}")
+
+                                viral_count = sum(1 for r in viral_results if r.is_viral)
+                                logger.info(f"Канал {channel_username}: {viral_count} viral постов из {len(posts)}")
+
+                    except Exception as e:
+                        logger.error(f"Ошибка расчета метрик для канала {channel_username}: {e}")
 
                 total_posts += len(posts)
                 logger.info(f"Канал {channel_username}: найдено {len(posts)} постов")

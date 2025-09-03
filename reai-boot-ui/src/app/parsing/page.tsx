@@ -25,7 +25,8 @@ import {
   PowerOff,
   Trash2,
   Activity,
-  Zap
+  Zap,
+  BarChart3
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { apiClient } from '@/lib/api'
@@ -48,6 +49,13 @@ interface Channel {
   is_active: boolean
   last_parsed?: string
   total_posts: number
+  baseline?: {
+    median_engagement_rate: number
+    std_engagement_rate: number
+    avg_engagement_rate: number
+    calculation_period_days: number
+    last_calculated: string
+  } | null
 }
 
 export default function ParsingPage() {
@@ -134,15 +142,64 @@ export default function ParsingPage() {
       if (channelsResult.error) throw channelsResult.error
       if (sessionsResult.error) throw sessionsResult.error
 
-      // Convert channels data
-      const channelsData: Channel[] = channelsResult.data.map(channel => ({
-        id: channel.id,
-        name: channel.title || channel.username.replace('@', ''),
-        username: channel.username,
-        is_active: channel.is_active,
-        last_parsed: channel.last_parsed,
-        total_posts: 0 // TODO: Calculate from posts table
-      }))
+      // Get posts count for each channel from our API
+      const channelsData: Channel[] = await Promise.all(
+        channelsResult.data.map(async (channel) => {
+          try {
+            // Get baseline data which includes all metrics
+            const baselineResponse = await supabase
+              .from('channel_baselines')
+              .select('*')
+              .eq('channel_username', channel.username)
+              .single()
+
+            const baseline = baselineResponse.data
+            const postsCount = baseline?.posts_analyzed || 0
+
+            return {
+              id: channel.id,
+              name: channel.title || channel.username.replace('@', ''),
+              username: channel.username,
+              is_active: channel.is_active,
+              last_parsed: channel.last_parsed,
+              total_posts: postsCount,
+              baseline: baseline ? {
+                median_engagement_rate: baseline.median_engagement_rate,
+                std_engagement_rate: baseline.std_engagement_rate,
+                avg_engagement_rate: baseline.avg_engagement_rate,
+                calculation_period_days: baseline.calculation_period_days,
+                last_calculated: baseline.last_calculated
+              } : null
+            }
+          } catch (error) {
+            // If baseline doesn't exist, try to count posts directly
+            try {
+              const postsResponse = await supabase
+                .from('posts')
+                .select('id', { count: 'exact', head: true })
+                .eq('channel_username', channel.username)
+
+              return {
+                id: channel.id,
+                name: channel.title || channel.username.replace('@', ''),
+                username: channel.username,
+                is_active: channel.is_active,
+                last_parsed: channel.last_parsed,
+                total_posts: postsResponse.count || 0
+              }
+            } catch (postsError) {
+              return {
+                id: channel.id,
+                name: channel.title || channel.username.replace('@', ''),
+                username: channel.username,
+                is_active: channel.is_active,
+                last_parsed: channel.last_parsed,
+                total_posts: 0
+              }
+            }
+          }
+        })
+      )
 
       // Convert parsing sessions to jobs
       const jobsData: ParsingJob[] = sessionsResult.data.map(session => ({
@@ -645,16 +702,44 @@ export default function ParsingPage() {
                   <div className={`w-3 h-3 rounded-full ${
                     channel.is_active ? 'bg-green-500' : 'bg-gray-400'
                   }`}></div>
-                  <div>
+                  <div className="flex-1">
                     <h3 className="font-medium text-gray-900">{channel.name}</h3>
                     <p className="text-sm text-gray-600">{channel.username}</p>
-                    <p className="text-xs text-gray-500">
-                      Постов: {channel.total_posts} |
-                      Последний парсинг: {channel.last_parsed ?
+                    <div className="text-xs text-gray-500 space-y-1">
+                      <p>Постов: {channel.total_posts}</p>
+                      <p>Последний парсинг: {channel.last_parsed ?
                         new Date(channel.last_parsed).toLocaleString('ru-RU') :
                         'Никогда'
-                      }
-                    </p>
+                      }</p>
+                    </div>
+                  </div>
+
+                  {/* Viral Metrics */}
+                  <div className="text-right text-xs space-y-1">
+                    <div className="flex items-center gap-1">
+                      <TrendingUp className="w-3 h-3 text-blue-500" />
+                      <span>Медиана: {channel.baseline ?
+                        `${(channel.baseline.median_engagement_rate * 100).toFixed(1)}%` :
+                        'Н/Д'
+                      }</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <BarChart3 className="w-3 h-3 text-green-500" />
+                      <span>Средняя: {channel.baseline ?
+                        `${(channel.baseline.avg_engagement_rate * 100).toFixed(1)}%` :
+                        'Н/Д'
+                      }</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Zap className="w-3 h-3 text-purple-500" />
+                      <span>Статус: {channel.baseline ? 'Рассчитан' : 'Не рассчитан'}</span>
+                    </div>
+                    {channel.baseline?.last_calculated && (
+                      <div className="flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-gray-500" />
+                        <span>Обновлено: {new Date(channel.baseline.last_calculated).toLocaleDateString('ru-RU')}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 

@@ -186,9 +186,13 @@ export default function AdminPage() {
       const result = await apiClient.sendTelegramCode(phoneNumber)
 
       if (result.status === 'code_sent') {
-        setPhoneCodeHash(result.phone_code_hash)
-        setAuthStep('code')
-        alert('Код отправлен! Проверьте SMS')
+        if (result.phone_code_hash) {
+          setPhoneCodeHash(result.phone_code_hash)
+          setAuthStep('code')
+          alert('Код отправлен! Проверьте SMS')
+        } else {
+          alert('Ошибка: Код подтверждения не получен')
+        }
       } else {
         alert(`Ошибка: ${result.message}`)
         if (result.can_retry) {
@@ -219,6 +223,11 @@ export default function AdminPage() {
 
     setAuthLoading(true)
     try {
+      if (!phoneCodeHash) {
+        alert('Код подтверждения телефона не найден. Попробуйте отправить код заново.')
+        return
+      }
+
       const result = await apiClient.verifyTelegramCode(verificationCode, phoneCodeHash)
 
       if (result.status === 'verified') {
@@ -928,45 +937,381 @@ export default function AdminPage() {
               {/* Settings Tab */}
               {viralTab === 'settings' && (
                 <div className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {systemSettings.map((setting: any) => (
-                      <Card key={setting.key}>
-                        <CardHeader>
-                          <CardTitle className="text-lg">{setting.key}</CardTitle>
-                          <p className="text-sm text-gray-600">{setting.description}</p>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-4">
-                            {typeof setting.value === 'object' ? (
-                              <div className="space-y-2">
-                                {Object.entries(setting.value).map(([key, value]) => (
-                                  <div key={key} className="flex justify-between items-center">
-                                    <span className="text-sm font-medium">{key}:</span>
-                                    <Input
-                                      type="number"
-                                      step="0.01"
-                                      defaultValue={value as string}
-                                      className="w-24"
-                                      onBlur={(e) => {
-                                        const newValue = { ...setting.value, [key]: parseFloat(e.target.value) }
-                                        updateSystemSetting(setting.key, newValue)
-                                      }}
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <Input
-                                type="number"
-                                step="0.01"
-                                defaultValue={setting.value}
-                                onBlur={(e) => updateSystemSetting(setting.key, parseFloat(e.target.value))}
-                              />
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
+                  {/* Viral Weights */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center">
+                        <Zap className="w-5 h-5 mr-2 text-yellow-500" />
+                        Веса для расчета Engagement Rate
+                      </CardTitle>
+                      <p className="text-sm text-gray-600">
+                        Коэффициенты для пересылок, реакций и комментариев
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <Label className="text-sm font-medium">Пересылки (forward_rate)</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="1"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'viral_weights')?.value?.forward_rate || 0.5}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_weights')
+                              if (setting) {
+                                const newValue = { ...setting.value, forward_rate: parseFloat(e.target.value) }
+                                updateSystemSetting('viral_weights', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Реакции (reaction_rate)</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="1"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'viral_weights')?.value?.reaction_rate || 0.3}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_weights')
+                              if (setting) {
+                                const newValue = { ...setting.value, reaction_rate: parseFloat(e.target.value) }
+                                updateSystemSetting('viral_weights', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Комментарии (reply_rate)</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="1"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'viral_weights')?.value?.reply_rate || 0.2}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_weights')
+                              if (setting) {
+                                const newValue = { ...setting.value, reply_rate: parseFloat(e.target.value) }
+                                updateSystemSetting('viral_weights', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Viral Thresholds */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center">
+                        <Target className="w-5 h-5 mr-2 text-red-500" />
+                        Пороги определения "залетевших" постов
+                      </CardTitle>
+                      <p className="text-sm text-gray-600">
+                        Минимальные значения для классификации поста как "залетевшего"
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-sm font-medium">Мин. Viral Score</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'viral_thresholds')?.value?.min_viral_score || 1.5}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_thresholds')
+                              if (setting) {
+                                const newValue = { ...setting.value, min_viral_score: parseFloat(e.target.value) }
+                                updateSystemSetting('viral_thresholds', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Мин. Z-score</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'viral_thresholds')?.value?.min_zscore || 1.5}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_thresholds')
+                              if (setting) {
+                                const newValue = { ...setting.value, min_zscore: parseFloat(e.target.value) }
+                                updateSystemSetting('viral_thresholds', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Мин. множитель медианы</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="1"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'viral_thresholds')?.value?.min_median_multiplier || 2.0}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_thresholds')
+                              if (setting) {
+                                const newValue = { ...setting.value, min_median_multiplier: parseFloat(e.target.value) }
+                                updateSystemSetting('viral_thresholds', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Мин. процент просмотров</Label>
+                          <Input
+                            type="number"
+                            step="0.0001"
+                            min="0"
+                            max="1"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'viral_thresholds')?.value?.min_views_percentile || 0.001}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_thresholds')
+                              if (setting) {
+                                const newValue = { ...setting.value, min_views_percentile: parseFloat(e.target.value) }
+                                updateSystemSetting('viral_thresholds', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Baseline Calculation */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center">
+                        <BarChart3 className="w-5 h-5 mr-2 text-blue-500" />
+                        Настройки расчета базовых метрик
+                      </CardTitle>
+                      <p className="text-sm text-gray-600">
+                        Параметры для анализа истории каналов
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-sm font-medium">Глубина истории (дни)</Label>
+                          <Input
+                            type="number"
+                            min="7"
+                            max="90"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'baseline_calculation')?.value?.history_days || 30}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'baseline_calculation')
+                              if (setting) {
+                                const newValue = { ...setting.value, history_days: parseInt(e.target.value) }
+                                updateSystemSetting('baseline_calculation', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Мин. постов для базовых метрик</Label>
+                          <Input
+                            type="number"
+                            min="5"
+                            max="50"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'baseline_calculation')?.value?.min_posts_for_baseline || 10}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'baseline_calculation')
+                              if (setting) {
+                                const newValue = { ...setting.value, min_posts_for_baseline: parseInt(e.target.value) }
+                                updateSystemSetting('baseline_calculation', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Процентиль для выбросов</Label>
+                          <Input
+                            type="number"
+                            min="90"
+                            max="99"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'baseline_calculation')?.value?.outlier_removal_percentile || 95}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'baseline_calculation')
+                              if (setting) {
+                                const newValue = { ...setting.value, outlier_removal_percentile: parseInt(e.target.value) }
+                                updateSystemSetting('baseline_calculation', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Интервал обновления (часы)</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            max="168"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'baseline_calculation')?.value?.baseline_update_interval_hours || 24}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'baseline_calculation')
+                              if (setting) {
+                                const newValue = { ...setting.value, baseline_update_interval_hours: parseInt(e.target.value) }
+                                updateSystemSetting('baseline_calculation', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Viral Calculation */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center">
+                        <Settings className="w-5 h-5 mr-2 text-green-500" />
+                        Настройки автоматического расчета
+                      </CardTitle>
+                      <p className="text-sm text-gray-600">
+                        Параметры для фоновой обработки метрик виральности
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="auto_calculate_viral"
+                            defaultChecked={systemSettings.find((s: any) => s.key === 'viral_calculation')?.value?.auto_calculate_viral ?? true}
+                            onChange={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_calculation')
+                              if (setting) {
+                                const newValue = { ...setting.value, auto_calculate_viral: e.target.checked }
+                                updateSystemSetting('viral_calculation', newValue)
+                              }
+                            }}
+                          />
+                          <Label htmlFor="auto_calculate_viral" className="text-sm">Автоматический расчет метрик</Label>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Размер батча</Label>
+                          <Input
+                            type="number"
+                            min="10"
+                            max="1000"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'viral_calculation')?.value?.batch_size || 100}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_calculation')
+                              if (setting) {
+                                const newValue = { ...setting.value, batch_size: parseInt(e.target.value) }
+                                updateSystemSetting('viral_calculation', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="update_existing_posts"
+                            defaultChecked={systemSettings.find((s: any) => s.key === 'viral_calculation')?.value?.update_existing_posts ?? false}
+                            onChange={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_calculation')
+                              if (setting) {
+                                const newValue = { ...setting.value, update_existing_posts: e.target.checked }
+                                updateSystemSetting('viral_calculation', newValue)
+                              }
+                            }}
+                          />
+                          <Label htmlFor="update_existing_posts" className="text-sm">Обновлять существующие метрики</Label>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Мин. просмотры для расчета</Label>
+                          <Input
+                            type="number"
+                            min="10"
+                            defaultValue={systemSettings.find((s: any) => s.key === 'viral_calculation')?.value?.min_views_for_viral || 100}
+                            onBlur={(e) => {
+                              const setting = systemSettings.find((s: any) => s.key === 'viral_calculation')
+                              if (setting) {
+                                const newValue = { ...setting.value, min_views_for_viral: parseInt(e.target.value) }
+                                updateSystemSetting('viral_calculation', newValue)
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Actions */}
+                  <div className="flex justify-center pt-4 gap-4">
+                    <Button
+                      onClick={async () => {
+                        try {
+                          // Принудительно сохраняем все текущие настройки
+                          const viralWeights = systemSettings.find((s: any) => s.key === 'viral_weights')
+                          const viralThresholds = systemSettings.find((s: any) => s.key === 'viral_thresholds')
+                          const baselineCalc = systemSettings.find((s: any) => s.key === 'baseline_calculation')
+                          const viralCalc = systemSettings.find((s: any) => s.key === 'viral_calculation')
+
+                          if (viralWeights) await updateSystemSetting('viral_weights', viralWeights.value)
+                          if (viralThresholds) await updateSystemSetting('viral_thresholds', viralThresholds.value)
+                          if (baselineCalc) await updateSystemSetting('baseline_calculation', baselineCalc.value)
+                          if (viralCalc) await updateSystemSetting('viral_calculation', viralCalc.value)
+
+                          alert('Настройки сохранены!')
+                          await loadViralSettings()
+                        } catch (error) {
+                          console.error('Error saving settings:', error)
+                          alert('Ошибка при сохранении настроек')
+                        }
+                      }}
+                      variant="default"
+                    >
+                      <Check className="w-4 h-4 mr-2" />
+                      Сохранить настройки
+                    </Button>
+
+                                      <Button
+                    onClick={async () => {
+                      try {
+                        const result = await apiClient.calculateViralMetricsBatch(undefined, 50)
+                        alert(`Обработано ${result.processed} постов`)
+                        await loadViralSettings()
+                      } catch (error) {
+                        console.error('Error calculating viral metrics:', error)
+                        alert('Ошибка при расчете метрик')
+                      }
+                    }}
+                    variant="outline"
+                  >
+                    <Zap className="w-4 h-4 mr-2" />
+                    Рассчитать метрики для 50 постов
+                  </Button>
+
+                  <Button
+                    onClick={async () => {
+                      if (!confirm('Это может занять много времени! Вы уверены, что хотите пересчитать метрики для ВСЕХ постов?')) {
+                        return
+                      }
+
+                      try {
+                        const result = await apiClient.calculateViralMetricsAllPosts()
+                        alert(`${result.message}\n\nОбработано: ${result.processed_posts}/${result.total_posts} постов\nНайдено виральных: ${result.channels.reduce((sum, ch) => sum + ch.viral_posts, 0)}`)
+                        await loadViralSettings()
+                      } catch (error) {
+                        console.error('Error calculating all viral metrics:', error)
+                        alert('Ошибка при расчете метрик')
+                      }
+                    }}
+                    variant="destructive"
+                  >
+                    <Zap className="w-4 h-4 mr-2" />
+                    Рассчитать метрики для ВСЕХ постов
+                  </Button>
                   </div>
                 </div>
               )}
@@ -976,10 +1321,28 @@ export default function AdminPage() {
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <h3 className="text-lg font-medium">Базовые метрики каналов</h3>
-                    <Button onClick={updateAllBaselines} variant="outline">
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                      Обновить все
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={async () => {
+                          try {
+                            const channels = channelBaselines.map((b: any) => b.channel.username)
+                            const result = await apiClient.startBulkParsing(channels, 30, 100)
+                            alert(`Запущен массовый парсинг для ${channels.length} каналов`)
+                          } catch (error) {
+                            console.error('Error starting bulk parsing:', error)
+                            alert('Ошибка при запуске парсинга')
+                          }
+                        }}
+                        variant="outline"
+                      >
+                        <Database className="w-4 h-4 mr-2" />
+                        Спарсить все каналы
+                      </Button>
+                      <Button onClick={updateAllBaselines} variant="outline">
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Пересчитать все метрики
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="grid gap-4">
@@ -995,9 +1358,52 @@ export default function AdminPage() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => calculateChannelBaseline(baseline.channel.username)}
+                                onClick={async () => {
+                                  try {
+                                    await apiClient.ensureChannelBaseline(baseline.channel.username, true)
+                                    alert(`Базовые метрики для ${baseline.channel.username} обновлены`)
+                                    await loadViralSettings()
+                                  } catch (error) {
+                                    console.error('Error ensuring baseline:', error)
+                                    alert('Ошибка при обновлении базовых метрик')
+                                  }
+                                }}
                               >
+                                <RefreshCw className="w-3 h-3 mr-1" />
                                 Пересчитать
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  try {
+                                    const result = await apiClient.startChannelParsing(baseline.channel.username, 30, 100)
+                                    alert(`Парсинг ${baseline.channel.username} запущен`)
+                                  } catch (error) {
+                                    console.error('Error starting parsing:', error)
+                                    alert('Ошибка при запуске парсинга')
+                                  }
+                                }}
+                              >
+                                <Database className="w-3 h-3 mr-1" />
+                                Спарсить
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  try {
+                                    const result = await apiClient.calculateViralMetricsBatch(baseline.channel.username, 50)
+                                    alert(`Обработано ${result.processed} постов для ${baseline.channel.username}`)
+                                    await loadViralSettings()
+                                  } catch (error) {
+                                    console.error('Error calculating viral metrics:', error)
+                                    alert('Ошибка при расчете метрик')
+                                  }
+                                }}
+                              >
+                                <Zap className="w-3 h-3 mr-1" />
+                                Рассчитать метрики
                               </Button>
                             </div>
                           </div>
@@ -1090,7 +1496,7 @@ export default function AdminPage() {
                   <Database className="w-6 h-6 mr-2 text-blue-500" />
                   Авторизация Telegram
                 </h2>
-                <Button variant="ghost" size="sm" onClick={() => setShowTelegramModal(false)}>
+                <Button variant="outline" size="sm" onClick={() => setShowTelegramModal(false)}>
                   ✕
                 </Button>
               </div>

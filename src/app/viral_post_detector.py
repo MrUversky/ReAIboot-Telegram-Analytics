@@ -56,12 +56,30 @@ class ViralPostDetector:
         """Загружает пороги для определения 'залетевших' постов."""
         try:
             # Получаем настройки из БД
-            viral_thresholds = self.baseline_analyzer.supabase.get_system_setting('viral_thresholds') or {
-                "min_viral_score": 1.5,
-                "min_zscore": 1.5,
-                "min_median_multiplier": 2.0,
-                "min_views_percentile": 0.001
-            }
+            viral_thresholds_raw = self.baseline_analyzer.supabase.get_system_setting('viral_thresholds')
+
+            if viral_thresholds_raw:
+                if isinstance(viral_thresholds_raw, str):
+                    try:
+                        import json
+                        viral_thresholds = json.loads(viral_thresholds_raw)
+                    except Exception as e:
+                        logger.warning(f"Failed to parse viral_thresholds: {e}, using defaults")
+                        viral_thresholds = {
+                            "min_viral_score": 1.5,
+                            "min_zscore": 1.5,
+                            "min_median_multiplier": 2.0,
+                            "min_views_percentile": 0.001
+                        }
+                else:
+                    viral_thresholds = viral_thresholds_raw
+            else:
+                viral_thresholds = {
+                    "min_viral_score": 1.5,
+                    "min_zscore": 1.5,
+                    "min_median_multiplier": 2.0,
+                    "min_views_percentile": 0.001
+                }
 
             return viral_thresholds
 
@@ -149,7 +167,20 @@ class ViralPostDetector:
             replies = post.get('replies', 0)
 
             # Используем веса из baseline_analyzer
-            weights = self.baseline_analyzer.settings['viral_weights']
+            weights = self.baseline_analyzer.settings.get('viral_weights', {})
+
+            # Если weights - строка JSON, распарсим её
+            if isinstance(weights, str):
+                try:
+                    import json
+                    weights = json.loads(weights)
+                    logger.debug(f"Parsed viral_weights in detector: {weights}")
+                except Exception as e:
+                    logger.warning(f"Ошибка парсинга viral_weights: {e}, используем дефолтные")
+                    weights = {"forward_rate": 0.5, "reaction_rate": 0.3, "reply_rate": 0.2}
+            elif not weights or not isinstance(weights, dict):
+                logger.warning("Viral weights not found or invalid in detector, using defaults")
+                weights = {"forward_rate": 0.5, "reaction_rate": 0.3, "reply_rate": 0.2}
 
             # Взвешенная сумма engagement
             weighted_engagement = (
@@ -159,6 +190,10 @@ class ViralPostDetector:
             )
 
             engagement_rate = weighted_engagement / views
+
+            logger.debug(f"Post {post.get('id', 'unknown')}: views={views}, forwards={forwards}, reactions={reactions}, replies={replies}")
+            logger.debug(f"Weights: {weights}")
+            logger.debug(f"Weighted engagement: {weighted_engagement}, engagement_rate: {engagement_rate}")
 
             return min(engagement_rate, 1.0)  # Ограничиваем максимумом 100%
 
@@ -208,20 +243,27 @@ class ViralPostDetector:
                       post: Dict[str, Any], baseline: ChannelBaseline) -> bool:
         """Определяет, является ли пост 'залетевшим'."""
         # Проверяем минимальный viral_score
-        if viral_score < self.settings['min_viral_score']:
+        if viral_score < self.settings.get('min_viral_score', 1.0):
             return False
 
         # Проверяем Z-score
-        if zscore < self.settings['min_zscore']:
+        if zscore < self.settings.get('min_zscore', 1.0):
             return False
 
         # Проверяем превышение медианы
-        if median_multiplier < self.settings['min_median_multiplier']:
+        if median_multiplier < self.settings.get('min_median_multiplier', 1.5):
             return False
 
         # Проверяем минимальные просмотры
         views = post.get('views', 0)
-        min_views = max(100, int(baseline.subscribers_count * self.settings['min_views_percentile']))
+        subscribers_count = getattr(baseline, 'subscribers_count', 0) or 0
+        if isinstance(subscribers_count, str):
+            try:
+                subscribers_count = int(subscribers_count)
+            except:
+                subscribers_count = 0
+
+        min_views = max(100, int(subscribers_count * self.settings.get('min_views_percentile', 0.001)))
         if views < min_views:
             return False
 
@@ -231,20 +273,24 @@ class ViralPostDetector:
         """Формирует список причин 'залетевшести' или отсутствия."""
         reasons = []
 
+        min_viral_score = self.settings.get('min_viral_score', 1.0)
+        min_zscore = self.settings.get('min_zscore', 1.0)
+        min_median_multiplier = self.settings.get('min_median_multiplier', 1.5)
+
         if is_viral:
-            if viral_score >= self.settings['min_viral_score']:
+            if viral_score >= min_viral_score:
                 reasons.append(f"Высокий viral_score: {viral_score:.2f}")
-            if zscore >= self.settings['min_zscore']:
+            if zscore >= min_zscore:
                 reasons.append(f"Высокий Z-score: {zscore:.2f}")
-            if median_multiplier >= self.settings['min_median_multiplier']:
+            if median_multiplier >= min_median_multiplier:
                 reasons.append(f"Превышение медианы: {median_multiplier:.1f}x")
         else:
-            if viral_score < self.settings['min_viral_score']:
-                reasons.append(f"Низкий viral_score: {viral_score:.2f} < {self.settings['min_viral_score']}")
-            if zscore < self.settings['min_zscore']:
-                reasons.append(f"Низкий Z-score: {zscore:.2f} < {self.settings['min_zscore']}")
-            if median_multiplier < self.settings['min_median_multiplier']:
-                reasons.append(f"Низкое превышение медианы: {median_multiplier:.1f}x < {self.settings['min_median_multiplier']}")
+            if viral_score < min_viral_score:
+                reasons.append(f"Низкий viral_score: {viral_score:.2f} < {min_viral_score}")
+            if zscore < min_zscore:
+                reasons.append(f"Низкий Z-score: {zscore:.2f} < {min_zscore}")
+            if median_multiplier < min_median_multiplier:
+                reasons.append(f"Низкое превышение медианы: {median_multiplier:.1f}x < {min_median_multiplier}")
 
         return reasons
 
@@ -259,8 +305,6 @@ class ViralPostDetector:
         Returns:
             Список результатов анализа
         """
-        logger.info(f"Анализ {len(posts)} постов канала {channel_username} на 'залетевшесть'")
-
         # Получаем базовые метрики канала
         baseline = self.baseline_analyzer.get_channel_baseline(channel_username)
 
@@ -282,6 +326,11 @@ class ViralPostDetector:
 
         results = []
         for post in posts:
+            # Проверяем, что post является словарем
+            if not isinstance(post, dict):
+                logger.error(f"Post is not a dict, it's {type(post)}: {post}")
+                continue
+
             result = self.analyze_post_virality(post, baseline)
             results.append(result)
 

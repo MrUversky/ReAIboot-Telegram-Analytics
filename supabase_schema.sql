@@ -339,6 +339,13 @@ CREATE POLICY "Authenticated users can view channel baselines" ON public.channel
 CREATE POLICY "System can modify channel baselines" ON public.channel_baselines
     FOR ALL TO authenticated WITH CHECK (true);
 
+-- Allow service role and anon key to modify channel baselines for system operations
+CREATE POLICY "Service role can manage channel baselines" ON public.channel_baselines
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "Anon can insert channel baselines" ON public.channel_baselines
+    FOR INSERT TO anon WITH CHECK (true);
+
 -- Similar policies for other tables...
 -- (You can add more specific policies based on your security requirements)
 
@@ -454,7 +461,7 @@ INSERT INTO public.system_settings (key, value, description, category) VALUES
   "forward_rate": 0.5,
   "reaction_rate": 0.3,
   "reply_rate": 0.2
-}', 'Веса для расчета engagement rate', 'viral_detection'),
+}', 'Веса для расчета engagement rate (пересылки, реакции, комментарии)', 'viral_detection'),
 
 ('viral_thresholds', '{
   "min_viral_score": 1.5,
@@ -466,12 +473,109 @@ INSERT INTO public.system_settings (key, value, description, category) VALUES
 ('baseline_calculation', '{
   "history_days": 30,
   "min_posts_for_baseline": 10,
-  "outlier_removal_percentile": 95
-}', 'Настройки расчета базовых метрик каналов', 'baseline_calculation'),
+  "outlier_removal_percentile": 95,
+  "baseline_update_interval_hours": 24,
+  "auto_baseline_update": true
+}', 'Настройки расчета и обновления базовых метрик каналов', 'baseline_calculation'),
+
+('viral_calculation', '{
+  "auto_calculate_viral": true,
+  "batch_size": 100,
+  "update_existing_posts": false,
+  "min_views_for_viral": 100
+}', 'Настройки автоматического расчета метрик виральности', 'viral_calculation'),
+
+('parsing_settings', '{
+  "default_days_back": 30,
+  "default_max_posts": 200,
+  "auto_calculate_metrics": true,
+  "auto_update_baselines": true,
+  "concurrent_channels": 3
+}', 'Настройки парсинга каналов и автоматической обработки', 'parsing'),
 
 ('channel_categories', '{
-  "small": {"max_subscribers": 10000, "viral_multiplier": 1.0},
-  "medium": {"max_subscribers": 100000, "viral_multiplier": 1.2},
-  "large": {"max_subscribers": 1000000, "viral_multiplier": 1.5}
-}', 'Категории каналов по размеру', 'channel_categories')
+  "small": {"max_subscribers": 10000, "viral_multiplier": 1.0, "min_baseline_posts": 10},
+  "medium": {"max_subscribers": 100000, "viral_multiplier": 1.2, "min_baseline_posts": 15},
+  "large": {"max_subscribers": 1000000, "viral_multiplier": 1.5, "min_baseline_posts": 20},
+  "huge": {"max_subscribers": 10000000, "viral_multiplier": 2.0, "min_baseline_posts": 25}
+}', 'Категории каналов по размеру и их настройки', 'channel_categories'),
+
+('llm_settings', '{
+  "default_model": "gpt-4o-mini",
+  "temperature": 0.7,
+  "max_tokens": 2000,
+  "timeout_seconds": 60,
+  "retry_attempts": 3,
+  "rate_limit_per_minute": 60
+}', 'Настройки LLM моделей для анализа и генерации', 'llm'),
+
+('quality_thresholds', '{
+  "min_content_score": 0.6,
+  "min_engagement_prediction": 0.4,
+  "auto_approve_threshold": 0.8,
+  "require_human_review": true
+}', 'Пороги качества для автоматического одобрения сценариев', 'quality_control')
 ON CONFLICT (key) DO NOTHING;
+
+-- ===============================================
+-- МИГРАЦИЯ: Обновление существующих настроек
+-- ===============================================
+
+-- Обновляем существующие настройки новыми полями
+UPDATE public.system_settings
+SET value = value::jsonb || '{"baseline_update_interval_hours": 24, "auto_baseline_update": true}'::jsonb
+WHERE key = 'baseline_calculation' AND NOT (value::jsonb ? 'baseline_update_interval_hours');
+
+UPDATE public.system_settings
+SET value = value::jsonb || '{"auto_calculate_viral": true, "batch_size": 100, "update_existing_posts": false, "min_views_for_viral": 100}'::jsonb
+WHERE key = 'viral_calculation' AND NOT (value::jsonb ? 'auto_calculate_viral');
+
+UPDATE public.system_settings
+SET value = value::jsonb || '{"default_days_back": 30, "default_max_posts": 200, "auto_calculate_metrics": true, "auto_update_baselines": true, "concurrent_channels": 3}'::jsonb
+WHERE key = 'parsing_settings' AND NOT (value::jsonb ? 'default_days_back');
+
+-- Создаем индексы для производительности
+CREATE INDEX IF NOT EXISTS idx_posts_viral_score ON public.posts(viral_score DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_channel_viral ON public.posts(channel_username, viral_score DESC);
+CREATE INDEX IF NOT EXISTS idx_channel_baselines_status ON public.channel_baselines(baseline_status);
+CREATE INDEX IF NOT EXISTS idx_posts_engagement_rate ON public.posts(engagement_rate DESC);
+
+-- ===============================================
+-- МИГРАЦИЯ: Исправление RLS политики для channel_baselines
+-- ===============================================
+
+-- Добавляем политики для service role и anon key
+DROP POLICY IF EXISTS "Service role can manage channel baselines" ON public.channel_baselines;
+DROP POLICY IF EXISTS "Anon can insert channel baselines" ON public.channel_baselines;
+DROP POLICY IF EXISTS "Anon can update channel baselines" ON public.channel_baselines;
+
+CREATE POLICY "Service role can manage channel baselines" ON public.channel_baselines
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "Anon can insert channel baselines" ON public.channel_baselines
+    FOR INSERT TO anon WITH CHECK (true);
+
+-- Также добавляем политику для UPDATE операций через anon key
+CREATE POLICY "Anon can update channel baselines" ON public.channel_baselines
+    FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+-- ===============================================
+-- ИНСТРУКЦИЯ ПО ПРИМЕНЕНИЮ МИГРАЦИИ
+-- ===============================================
+--
+-- 1. Подключитесь к Supabase SQL Editor
+-- 2. Выполните этот файл целиком
+-- 3. Или выполните команды по отдельности:
+--
+-- Для новых проектов:
+-- psql -h [host] -U [user] -d [database] -f supabase_schema.sql
+--
+-- Для существующих проектов (только новые настройки):
+-- Выполните блок "МИГРАЦИЯ" начиная со строки 514
+--
+-- 4. Проверьте, что настройки создались:
+-- SELECT key, value FROM system_settings WHERE category = 'viral_detection';
+--
+-- 5. Для исправления RLS проблем выполните блок "МИГРАЦИЯ RLS" начиная со строки 570
+--
+-- ===============================================

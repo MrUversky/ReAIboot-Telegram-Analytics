@@ -8,7 +8,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
 import {
   Search,
   Filter,
@@ -20,7 +22,8 @@ import {
   Eye,
   Heart,
   MessageCircle,
-  Share
+  Share,
+  Zap
 } from 'lucide-react'
 import { apiClient, Post } from '@/lib/api'
 
@@ -30,10 +33,15 @@ export default function PostsPage() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loadingPosts, setLoadingPosts] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const [sortBy, setSortBy] = useState<'date' | 'score' | 'views'>('score')
+  const [sortBy, setSortBy] = useState<'date' | 'score' | 'views' | 'viral_score' | 'engagement_rate' | 'forwards' | 'reactions'>('viral_score')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [filterChannel, setFilterChannel] = useState<string>('all')
   const [channels, setChannels] = useState<string[]>([])
+  const [showOnlyViral, setShowOnlyViral] = useState(false)
+  const [minViralScore, setMinViralScore] = useState(1.0)
+  const [dateRange, setDateRange] = useState<'7d' | '30d' | 'all'>('7d')
+  const [minViews, setMinViews] = useState<number>(0)
+  const [minEngagement, setMinEngagement] = useState<number>(0)
 
   useEffect(() => {
     if (!loading && !user) {
@@ -47,14 +55,54 @@ export default function PostsPage() {
     }
   }, [user])
 
+  // Reload posts when filters change
+  useEffect(() => {
+    if (user) {
+      loadPosts()
+    }
+  }, [user, dateRange, minViews, minEngagement])
+
   const loadPosts = async () => {
     try {
       setLoadingPosts(true)
-      const postsData = await apiClient.getPosts(100) // Load more posts
+
+      // Calculate date filter
+      let limit = 1000 // Load more posts for filtering
+      const endDate = new Date()
+      let startDate: Date | null = null
+
+      if (dateRange === '7d') {
+        startDate = new Date()
+        startDate.setDate(startDate.getDate() - 7)
+        limit = 500 // Load more for 7 days
+      } else if (dateRange === '30d') {
+        startDate = new Date()
+        startDate.setDate(startDate.getDate() - 30)
+        limit = 1000 // Load more for 30 days
+      }
+
+      const response = await apiClient.getPosts(limit)
+      let postsData: Post[] = response
+
+      // Apply date filter on frontend if needed
+      if (startDate) {
+        postsData = postsData.filter((post: Post) => {
+          const postDate = new Date(post.date)
+          return postDate >= startDate! && postDate <= endDate
+        })
+      }
+
+      // Apply additional filters
+      postsData = postsData.filter((post: Post) => {
+        if (minViews > 0 && post.views < minViews) return false
+        if (minEngagement > 0 && (post.engagement_rate || 0) * 100 < minEngagement) return false
+        return true
+      })
+
       setPosts(postsData)
 
       // Extract unique channels
-      const uniqueChannels = [...new Set(postsData.map(post => post.channel_username))]
+      const uniqueChannels = [...new Set(postsData.map((post: Post) => post.channel_username))]
       setChannels(uniqueChannels)
     } catch (error) {
       console.error('Error loading posts:', error)
@@ -82,7 +130,9 @@ export default function PostsPage() {
 
       const matchesChannel = filterChannel === 'all' || post.channel_username === filterChannel
 
-      return matchesSearch && matchesChannel
+      const matchesViral = !showOnlyViral || (post.viral_score && post.viral_score >= minViralScore)
+
+      return matchesSearch && matchesChannel && matchesViral
     })
     .sort((a, b) => {
       let aValue: number, bValue: number
@@ -95,6 +145,22 @@ export default function PostsPage() {
         case 'views':
           aValue = a.views
           bValue = b.views
+          break
+        case 'viral_score':
+          aValue = a.viral_score || 0
+          bValue = b.viral_score || 0
+          break
+        case 'engagement_rate':
+          aValue = (a.engagement_rate || 0) * 100
+          bValue = (b.engagement_rate || 0) * 100
+          break
+        case 'forwards':
+          aValue = a.forwards
+          bValue = b.forwards
+          break
+        case 'reactions':
+          aValue = a.reactions
+          bValue = b.reactions
           break
         case 'date':
         default:
@@ -201,40 +267,7 @@ export default function PostsPage() {
         </Card>
       </div>
 
-      {/* Top Posts */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center">
-            <TrendingUp className="w-5 h-5 mr-2" />
-            Топ-10 постов
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {getTopPosts().map((post, index) => (
-              <div key={post.id} className="relative">
-                <div className="absolute -top-2 -left-2 z-10">
-                  <Badge className="bg-yellow-500 text-white">
-                    #{index + 1}
-                  </Badge>
-                </div>
-                <PostCard
-                  post={post}
-                  onAnalyze={handleAnalyzePost}
-                  showAnalysis={true}
-                />
-              </div>
-            ))}
-          </div>
-          {getTopPosts().length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-              <p>Нет постов для отображения</p>
-              <p className="text-sm mt-2">Запустите парсинг для загрузки данных</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+
 
       {/* Filters and Search */}
       <Card>
@@ -256,6 +289,31 @@ export default function PostsPage() {
               />
             </div>
 
+            <Select value={dateRange} onValueChange={(value: any) => setDateRange(value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Период" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7d">Последние 7 дней</SelectItem>
+                <SelectItem value="30d">Последние 30 дней</SelectItem>
+                <SelectItem value="all">Все время</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="viral-only"
+                checked={showOnlyViral}
+                onCheckedChange={setShowOnlyViral}
+              />
+              <div className="flex items-center gap-1">
+                <Zap className="w-4 h-4 text-purple-500" />
+                <label htmlFor="viral-only" className="text-sm font-medium cursor-pointer">
+                  Только виральные
+                </label>
+              </div>
+            </div>
+
             <Select value={filterChannel} onValueChange={setFilterChannel}>
               <SelectTrigger>
                 <SelectValue placeholder="Все каналы" />
@@ -275,8 +333,12 @@ export default function PostsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="viral_score">По виральности</SelectItem>
                 <SelectItem value="score">По рейтингу</SelectItem>
                 <SelectItem value="views">По просмотрам</SelectItem>
+                <SelectItem value="engagement_rate">По вовлеченности</SelectItem>
+                <SelectItem value="forwards">По репостам</SelectItem>
+                <SelectItem value="reactions">По реакциям</SelectItem>
                 <SelectItem value="date">По дате</SelectItem>
               </SelectContent>
             </Select>
@@ -292,6 +354,68 @@ export default function PostsPage() {
               )}
               {sortOrder === 'asc' ? 'По возрастанию' : 'По убыванию'}
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Advanced Filters */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <Filter className="w-5 h-5 mr-2" />
+            Дополнительные фильтры
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <Label className="text-sm font-medium">Мин. просмотры</Label>
+              <Input
+                type="number"
+                placeholder="0"
+                value={minViews}
+                onChange={(e) => setMinViews(Number(e.target.value) || 0)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Мин. вовлеченность (%)</Label>
+              <Input
+                type="number"
+                placeholder="0"
+                value={minEngagement}
+                onChange={(e) => setMinEngagement(Number(e.target.value) || 0)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Мин. viral score</Label>
+              <Input
+                type="number"
+                step="0.1"
+                placeholder="1.0"
+                value={minViralScore}
+                onChange={(e) => setMinViralScore(Number(e.target.value) || 1.0)}
+                className="mt-1"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setMinViews(0)
+                  setMinEngagement(0)
+                  setMinViralScore(1.0)
+                  setShowOnlyViral(false)
+                  setSearchTerm('')
+                  setFilterChannel('all')
+                  setDateRange('7d')
+                }}
+                className="w-full"
+              >
+                Сбросить фильтры
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

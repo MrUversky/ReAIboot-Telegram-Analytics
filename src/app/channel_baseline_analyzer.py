@@ -65,15 +65,30 @@ class ChannelBaselineAnalyzer:
         """Загружает настройки из базы данных."""
         try:
             # Получаем настройки из БД
-            viral_weights = self.supabase.get_system_setting('viral_weights') or {
-                "forward_rate": 0.5,
-                "reaction_rate": 0.3,
-                "reply_rate": 0.2
-            }
+            viral_weights_raw = self.supabase.get_system_setting('viral_weights')
+            logger.info(f"🔧 Raw viral_weights from DB: {viral_weights_raw} (type: {type(viral_weights_raw)})")
+            logger.debug(f"Raw viral_weights from DB: {viral_weights_raw} (type: {type(viral_weights_raw)})")
+
+            if viral_weights_raw:
+                # Если weights - строка JSON, распарсим её
+                if isinstance(viral_weights_raw, str):
+                    try:
+                        import json
+                        viral_weights = json.loads(viral_weights_raw)
+                        logger.debug(f"Parsed viral_weights from JSON string: {viral_weights}")
+                    except Exception as e:
+                        logger.warning(f"Ошибка парсинга viral_weights: {e}, используем дефолтные")
+                        viral_weights = {"forward_rate": 0.5, "reaction_rate": 0.3, "reply_rate": 0.2}
+                else:
+                    viral_weights = viral_weights_raw
+                    logger.debug(f"Using viral_weights as-is: {viral_weights}")
+            else:
+                logger.warning("viral_weights not found in DB, using defaults")
+                viral_weights = {"forward_rate": 0.5, "reaction_rate": 0.3, "reply_rate": 0.2}
 
             baseline_calculation = self.supabase.get_system_setting('baseline_calculation') or {
                 "history_days": 30,
-                "min_posts_for_baseline": 10,
+                "min_posts_for_baseline": 3,
                 "outlier_removal_percentile": 95
             }
 
@@ -117,8 +132,12 @@ class ChannelBaselineAnalyzer:
                 if engagement_rate is not None:
                     engagement_rates.append(engagement_rate)
 
-            if len(engagement_rates) < self.settings['baseline_calculation']['min_posts_for_baseline']:
-                logger.info(f"Недостаточно постов для канала {channel_username}: {len(engagement_rates)} < {self.settings['baseline_calculation']['min_posts_for_baseline']}")
+            # Используем настройки из базы данных, но обеспечиваем разумный минимум
+            min_from_settings = self.settings['baseline_calculation'].get('min_posts_for_baseline', 5)
+            min_required = max(min_from_settings, 3)  # Минимум 3 поста, но можно больше из настроек
+
+            if len(engagement_rates) < min_required:
+                logger.info(f"Недостаточно постов для канала {channel_username}: {len(engagement_rates)} < {min_required}")
                 return None
 
             # Удаляем выбросы
@@ -170,14 +189,44 @@ class ChannelBaselineAnalyzer:
             reactions = post.get('reactions', 0)
             replies = post.get('replies', 0)
 
+            # Отладка настроек
+            logger.debug(f"Settings structure: {self.settings}")
+            logger.debug(f"Viral weights: {self.settings.get('viral_weights', 'NOT FOUND')}")
+
             # Взвешенная сумма engagement
+            viral_weights = self.settings.get('viral_weights', {})
+            logger.debug(f"Using viral_weights: {viral_weights} (type: {type(viral_weights)})")
+
+            if isinstance(viral_weights, str):
+                try:
+                    import json
+                    viral_weights = json.loads(viral_weights)
+                    logger.debug(f"Parsed viral_weights: {viral_weights}")
+                except Exception as e:
+                    logger.error(f"Failed to parse viral_weights JSON: {e}")
+                    viral_weights = {"forward_rate": 0.5, "reaction_rate": 0.3, "reply_rate": 0.2}
+
+            if not viral_weights or not isinstance(viral_weights, dict):
+                logger.warning("Viral weights not found or invalid, using defaults")
+                viral_weights = {"forward_rate": 0.5, "reaction_rate": 0.3, "reply_rate": 0.2}
+
             weighted_engagement = (
-                forwards * self.settings['viral_weights']['forward_rate'] +
-                reactions * self.settings['viral_weights']['reaction_rate'] +
-                replies * self.settings['viral_weights']['reply_rate']
+                forwards * viral_weights.get('forward_rate', 0.5) +
+                reactions * viral_weights.get('reaction_rate', 0.3) +
+                replies * viral_weights.get('reply_rate', 0.2)
             )
 
             engagement_rate = weighted_engagement / views
+
+            # ДОБАВЛЯЕМ ПОДРОБНОЕ ЛОГИРОВАНИЕ
+            logger.info(f"🔢 РАСЧЕТ ENGAGEMENT для поста {post.get('id', 'unknown')}:")
+            logger.info(f"   Веса: forward={viral_weights.get('forward_rate', 0.5)}, reaction={viral_weights.get('reaction_rate', 0.3)}, reply={viral_weights.get('reply_rate', 0.2)}")
+            logger.info(f"   Данные: views={views}, forwards={forwards}, reactions={reactions}, replies={replies}")
+            logger.info(f"   Расчет: {forwards}*{viral_weights.get('forward_rate', 0.5)} + {reactions}*{viral_weights.get('reaction_rate', 0.3)} + {replies}*{viral_weights.get('reply_rate', 0.2)} = {weighted_engagement}")
+            logger.info(f"   Engagement rate: {weighted_engagement}/{views} = {engagement_rate}")
+
+            logger.debug(f"Post {post.get('id', 'unknown')}: views={views}, forwards={forwards}, reactions={reactions}, replies={replies}")
+            logger.debug(f"Weighted engagement: {weighted_engagement}, engagement_rate: {engagement_rate}")
 
             return min(engagement_rate, 1.0)  # Ограничиваем максимумом 100%
 
@@ -193,7 +242,7 @@ class ChannelBaselineAnalyzer:
         # Используем percentile для удаления выбросов
         percentile_threshold = self.settings['baseline_calculation']['outlier_removal_percentile']
 
-        if len(engagement_rates) >= 10:  # Только если достаточно данных
+        if len(engagement_rates) >= 5:  # Используем минимум 5 постов для удаления выбросов
             threshold_value = np.percentile(engagement_rates, percentile_threshold)
             return [rate for rate in engagement_rates if rate <= threshold_value]
 

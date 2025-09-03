@@ -2,7 +2,7 @@ import React from 'react'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Eye, Heart, MessageCircle, Share, ExternalLink, TrendingUp } from 'lucide-react'
+import { Eye, Heart, MessageCircle, Share, ExternalLink, TrendingUp, Zap, BarChart3 } from 'lucide-react'
 import type { Post } from '@/lib/api'
 
 interface PostCardProps {
@@ -73,6 +73,54 @@ export function PostCard({ post, onAnalyze, showAnalysis = true }: PostCardProps
             <span className="font-medium">{formatNumber(post.forwards)}</span>
           </div>
         </div>
+
+        {/* Viral Metrics */}
+        {(post.viral_score !== undefined && post.viral_score !== null) && (
+          <div className={`p-3 rounded-lg mb-4 ${
+            (post.viral_score || 0) > 0
+              ? 'bg-gradient-to-r from-purple-50 to-blue-50'
+              : 'bg-gradient-to-r from-gray-50 to-gray-100'
+          }`}>
+            <div className="flex items-center gap-2 mb-2">
+              <Zap className={`w-4 h-4 ${(post.viral_score || 0) > 0 ? 'text-purple-600' : 'text-gray-500'}`} />
+              <span className={`text-sm font-medium ${(post.viral_score || 0) > 0 ? 'text-gray-700' : 'text-gray-600'}`}>
+                Виральные метрики
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <BarChart3 className={`w-3 h-3 ${(post.viral_score || 0) > 0 ? 'text-purple-500' : 'text-gray-400'}`} />
+                <span className="text-gray-600">Viral Score:</span>
+                <Badge variant={(post.viral_score || 0) >= 1.5 ? "default" : ((post.viral_score || 0) > 0 ? "secondary" : "outline")}>
+                  {(post.viral_score || 0).toFixed(2)}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <TrendingUp className={`w-3 h-3 ${(post.viral_score || 0) > 0 ? 'text-blue-500' : 'text-gray-400'}`} />
+                <span className="text-gray-600">Engagement:</span>
+                <span className={`font-medium ${(post.viral_score || 0) > 0 ? 'text-gray-900' : 'text-gray-500'}`}>
+                  {((post.engagement_rate || 0) * 100).toFixed(1)}%
+                </span>
+              </div>
+              {post.zscore !== undefined && post.zscore !== null && (
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-600">Z-score:</span>
+                  <span className={`font-medium ${(post.viral_score || 0) > 0 ? 'text-gray-900' : 'text-gray-500'}`}>
+                    {post.zscore.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {post.median_multiplier !== undefined && post.median_multiplier !== null && (
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-600">× медианы:</span>
+                  <span className={`font-medium ${(post.viral_score || 0) > 0 ? 'text-gray-900' : 'text-gray-500'}`}>
+                    {post.median_multiplier.toFixed(1)}×
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Rubrics */}
         {post.rubrics && post.rubrics.length > 0 && (
