@@ -154,7 +154,7 @@ class TelegramAnalyzer:
                             "timeout": 60
                         }
                 except Exception as e:
-                    logger.warning(f"Ошибка при проверке авторизации: {e}")
+                    logger.warning(f"Ошибка при проверке авторизации: {e}")да!
 
                 # Отправляем код
                 logger.info("Отправляем код подтверждения...")
