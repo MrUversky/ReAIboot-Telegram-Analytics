@@ -1307,7 +1307,8 @@ export default function AdminPage() {
                         alert('Ошибка при расчете метрик')
                       }
                     }}
-                    variant="destructive"
+                    variant="outline"
+                    className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
                   >
                     <Zap className="w-4 h-4 mr-2" />
                     Рассчитать метрики для ВСЕХ постов
