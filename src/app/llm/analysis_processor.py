@@ -132,38 +132,56 @@ class AnalysisProcessor(BaseLLMProcessor):
                     processing_time=time.time() - start_time
                 )
 
-            # Парсим ответ
+            # Парсим и валидируем ответ
             result_text = response.content[0].text
             tokens_used = self._calculate_tokens(user_prompt, result_text)
 
-            try:
-                import json
-                result_json = json.loads(result_text)
+            # Валидируем ответ по схеме
+            schema = self.get_stage_schema("analysis")
+            success, validated_data, validation_error = self.validate_json_response(result_text, schema)
 
+            if success and validated_data:
                 return ProcessingResult(
                     success=True,
                     data={
-                        **result_json,
+                        **validated_data,
                         "analysis_model": "claude-3-5-sonnet"
                     },
                     tokens_used=tokens_used,
                     processing_time=time.time() - start_time
                 )
+            else:
+                logger.warning(f"Analysis validation failed: {validation_error}")
+                # Попытка fallback парсинга
+                try:
+                    import json
+                    fallback_data = json.loads(result_text)
 
-            except json.JSONDecodeError:
-                logger.warning(f"Не удалось распарсить JSON от Claude: {result_text}")
+                    return ProcessingResult(
+                        success=True,
+                        data={
+                            **fallback_data,
+                            "analysis_model": "claude-3-5-sonnet",
+                            "validation_warning": validation_error
+                        },
+                        tokens_used=tokens_used,
+                        processing_time=time.time() - start_time
+                    )
+                except json.JSONDecodeError:
+                    logger.warning(f"Не удалось распарсить JSON от Claude: {result_text}")
 
-                # Возвращаем сырой текст как fallback
-                return ProcessingResult(
-                    success=True,
-                    data={
-                        "raw_analysis": result_text,
-                        "analysis_model": "claude-3-5-sonnet",
-                        "parsing_error": "JSON parsing failed"
-                    },
-                    tokens_used=tokens_used,
-                    processing_time=time.time() - start_time
-                )
+                    # Возвращаем сырой текст как fallback
+                    return ProcessingResult(
+                        success=True,
+                        data={
+                            "raw_analysis": result_text,
+                            "analysis_model": "claude-3-5-sonnet",
+                            "parsing_error": "JSON parsing failed",
+                            "validation_error": validation_error
+                        },
+                        tokens_used=tokens_used,
+                        processing_time=time.time() - start_time
+                    )
 
         except Exception as e:
             logger.error(f"Ошибка в AnalysisProcessor: {e}", exc_info=True)

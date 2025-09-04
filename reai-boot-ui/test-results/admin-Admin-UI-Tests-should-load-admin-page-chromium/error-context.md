@@ -1,0 +1,42 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e5]:
+        - heading "ReAIboot" [level=1] [ref=e7]
+        - link "Войти" [ref=e9] [cursor=pointer]:
+          - /url: /auth
+    - main [ref=e10]:
+      - generic [ref=e12]:
+        - generic [ref=e13]:
+          - img [ref=e15]
+          - heading "Вход в ReAIboot" [level=2] [ref=e17]
+          - paragraph [ref=e18]: Автоматизированный анализ Telegram для контент-маркетинга
+        - generic [ref=e20]:
+          - generic [ref=e22]:
+            - button "Войти через Google" [ref=e23] [cursor=pointer]:
+              - img [ref=e24] [cursor=pointer]
+              - text: Войти через Google
+            - button "Войти через Github" [ref=e29] [cursor=pointer]:
+              - img [ref=e30] [cursor=pointer]
+              - text: Войти через Github
+          - generic [ref=e34]:
+            - generic [ref=e35]:
+              - generic [ref=e36]:
+                - generic [ref=e37]: Email
+                - textbox "Email" [ref=e38]
+              - generic [ref=e39]:
+                - generic [ref=e40]: Пароль
+                - textbox "Пароль" [ref=e41]
+            - button "Войти" [ref=e42] [cursor=pointer]
+            - generic [ref=e43]:
+              - link "Forgot your password?" [ref=e44] [cursor=pointer]:
+                - /url: "#auth-forgot-password"
+              - link "Нет аккаунта? Зарегистрироваться" [ref=e45] [cursor=pointer]:
+                - /url: "#auth-sign-up"
+  - button "Open Next.js Dev Tools" [ref=e51] [cursor=pointer]:
+    - img [ref=e52] [cursor=pointer]
+  - alert [ref=e55]
+```

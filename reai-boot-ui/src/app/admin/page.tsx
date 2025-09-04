@@ -64,9 +64,10 @@ export default function AdminPage() {
   // LLM settings state
   const [rubrics, setRubrics] = useState<any[]>([])
   const [formats, setFormats] = useState<any[]>([])
-  const [prompts, setPrompts] = useState<any[]>([])
+  const [dbPrompts, setDbPrompts] = useState<any[]>([])
+  const [filePrompts, setFilePrompts] = useState<any>({})
   const [showLLMModal, setShowLLMModal] = useState(false)
-  const [llmTab, setLlmTab] = useState<'rubrics' | 'formats' | 'prompts'>('rubrics')
+  const [llmTab, setLlmTab] = useState<'rubrics' | 'formats' | 'prompts'>('prompts')
 
   // Viral Detection settings state
   const [systemSettings, setSystemSettings] = useState<any[]>([])
@@ -109,6 +110,11 @@ export default function AdminPage() {
     max_tokens: 2000,
     is_active: true
   })
+
+  const [promptTestVariables, setPromptTestVariables] = useState<Record<string, string>>({})
+  const [promptTestResult, setPromptTestResult] = useState<any>(null)
+  const [showPromptTest, setShowPromptTest] = useState(false)
+  const [selectedTestPromptId, setSelectedTestPromptId] = useState<string>("")
 
   // Telegram Auth functions
   const checkTelegramStatus = async () => {
@@ -355,10 +361,11 @@ export default function AdminPage() {
   // LLM settings functions
   const loadLLMSettings = async () => {
     try {
-      const [rubricsResult, formatsResult, promptsResult] = await Promise.all([
+      const [rubricsResult, formatsResult, dbPromptsResult, filePromptsResult] = await Promise.all([
         supabase.from('rubrics').select('*').order('name'),
         supabase.from('reel_formats').select('*').order('name'),
-        supabase.from('llm_prompts').select('*').order('name')
+        supabase.from('llm_prompts').select('*').order('created_at', { ascending: false }),
+        apiClient.getPrompts()
       ])
 
       if (rubricsResult.error) throw rubricsResult.error
@@ -366,7 +373,8 @@ export default function AdminPage() {
 
       setRubrics(rubricsResult.data || [])
       setFormats(formatsResult.data || [])
-      setPrompts(promptsResult.error ? [] : (promptsResult.data || []))
+      setDbPrompts(dbPromptsResult.error ? [] : (dbPromptsResult.data || []))
+      setFilePrompts(filePromptsResult || {})
     } catch (error) {
       console.error('Error loading LLM settings:', error)
       alert('Ошибка при загрузке настроек LLM')
@@ -578,27 +586,19 @@ export default function AdminPage() {
 
   const savePrompt = async () => {
     try {
-      const promptData = {
-        ...promptForm,
-        updated_at: new Date().toISOString()
+      if (!promptForm.name || !promptForm.content) {
+        alert('Название и содержимое промпта обязательны')
+        return
       }
 
       if (promptForm.id) {
-        const { error } = await supabase
-          .from('llm_prompts')
-          .update(promptData)
-          .eq('id', promptForm.id)
-        if (error) throw error
+        // Обновление существующего промпта
+        await apiClient.updatePromptDB(parseInt(promptForm.id), promptForm)
+        alert('Промпт обновлен успешно')
       } else {
-        const newId = `prompt_${Date.now()}`
-        const { error } = await supabase
-          .from('llm_prompts')
-          .insert([{
-            ...promptData,
-            id: newId,
-            created_at: new Date().toISOString()
-          }])
-        if (error) throw error
+        // Создание нового промпта
+        await apiClient.createPromptDB(promptForm)
+        alert('Промпт создан успешно')
       }
 
       await loadLLMSettings()
@@ -613,12 +613,8 @@ export default function AdminPage() {
     if (!confirm('Вы уверены, что хотите удалить этот промпт?')) return
 
     try {
-      const { error } = await supabase
-        .from('llm_prompts')
-        .delete()
-        .eq('id', promptId)
-
-      if (error) throw error
+      await apiClient.deletePromptDB(parseInt(promptId))
+      alert('Промпт удален успешно')
       await loadLLMSettings()
     } catch (error) {
       console.error('Error deleting prompt:', error)
@@ -638,11 +634,12 @@ export default function AdminPage() {
       max_tokens: 2000,
       is_active: true
     })
+    setShowLLMModal(false)
   }
 
   const editPrompt = (prompt: any) => {
     setPromptForm({
-      id: prompt.id,
+      id: prompt.id.toString(),
       name: prompt.name,
       description: prompt.description || '',
       prompt_type: prompt.prompt_type,
@@ -652,6 +649,52 @@ export default function AdminPage() {
       max_tokens: prompt.max_tokens,
       is_active: prompt.is_active
     })
+    setShowLLMModal(true)
+  }
+
+  const testPrompt = async (promptId: number) => {
+    try {
+      const result = await apiClient.testPromptDB(promptId, promptTestVariables)
+      setPromptTestResult(result)
+    } catch (error) {
+      console.error('Error testing prompt:', error)
+      alert('Ошибка при тестировании промпта')
+    }
+  }
+
+  const extractVariablesFromPrompt = (content: string): string[] => {
+    const variableRegex = /\{\{([^}]+)\}\}/g
+    const variables: string[] = []
+    let match
+
+    while ((match = variableRegex.exec(content)) !== null) {
+      const variable = match[1].trim()
+      if (!variables.includes(variable)) {
+        variables.push(variable)
+      }
+    }
+
+    return variables
+  }
+
+  const getModelDisplayName = (model: string): string => {
+    const modelNames: Record<string, string> = {
+      'gpt-4o-mini': 'GPT-4o Mini',
+      'gpt-4o': 'GPT-4o',
+      'claude-3-5-sonnet-20241022': 'Claude-3.5-Sonnet',
+      'claude-3-haiku-20240307': 'Claude-3-Haiku'
+    }
+    return modelNames[model] || model
+  }
+
+  const getPromptTypeDisplayName = (type: string): string => {
+    const typeNames: Record<string, string> = {
+      'filter': 'Фильтр постов',
+      'analysis': 'Анализ поста',
+      'generation': 'Генерация сценария',
+      'custom': 'Пользовательский'
+    }
+    return typeNames[type] || type
   }
 
   const getRoleBadge = (role: string) => {
@@ -1604,6 +1647,499 @@ export default function AdminPage() {
                     {authLoading ? 'Сброс...' : '🔄 Сбросить авторизацию'}
                   </Button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LLM Settings Modal */}
+      {showLLMModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+                  <Settings className="w-6 h-6 mr-2 text-blue-500" />
+                  Настройки LLM Пайплайна
+                </h2>
+                <Button variant="outline" onClick={() => setShowLLMModal(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg">
+                <button
+                  onClick={() => setLlmTab('prompts')}
+                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                    llmTab === 'prompts'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Edit className="w-4 h-4 inline mr-2" />
+                  Промпты
+                </button>
+                <button
+                  onClick={() => setLlmTab('rubrics')}
+                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                    llmTab === 'rubrics'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Target className="w-4 h-4 inline mr-2" />
+                  Рубрики
+                </button>
+                <button
+                  onClick={() => setLlmTab('formats')}
+                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                    llmTab === 'formats'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4 inline mr-2" />
+                  Форматы
+                </button>
+              </div>
+
+              {/* Prompts Tab */}
+              {llmTab === 'prompts' && (
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-medium">Управление промптами</h3>
+                    <Button onClick={() => setShowPromptTest(!showPromptTest)} variant="outline">
+                      <Zap className="w-4 h-4 mr-2" />
+                      {showPromptTest ? 'Скрыть тестирование' : 'Показать тестирование'}
+                    </Button>
+                  </div>
+
+                  {/* Prompts List */}
+                  <div className="grid gap-4">
+                    {dbPrompts.map((prompt: any) => (
+                      <Card key={prompt.id}>
+                        <CardHeader>
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <CardTitle className="text-base">{prompt.name}</CardTitle>
+                              <p className="text-sm text-gray-600">{prompt.description}</p>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Badge variant={prompt.is_active ? 'default' : 'secondary'}>
+                                {prompt.is_active ? 'Активен' : 'Неактивен'}
+                              </Badge>
+                              <Badge className="bg-blue-100 text-blue-800">
+                                {getModelDisplayName(prompt.model)}
+                              </Badge>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => editPrompt(prompt)}
+                              >
+                                <Edit className="w-3 h-3 mr-1" />
+                                Редактировать
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => deletePrompt(prompt.id.toString())}
+                              >
+                                <Trash2 className="w-3 h-3 mr-1" />
+                                Удалить
+                              </Button>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                              <span className="text-gray-600">Тип:</span>
+                              <span className="ml-1 font-medium">{prompt.prompt_type}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Температура:</span>
+                              <span className="ml-1 font-medium">{prompt.temperature}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Макс. токенов:</span>
+                              <span className="ml-1 font-medium">{prompt.max_tokens}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Создан:</span>
+                              <span className="ml-1 font-medium">
+                                {new Date(prompt.created_at).toLocaleDateString('ru-RU')}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mt-3">
+                            <p className="text-sm text-gray-600 mb-1">Содержимое:</p>
+                            <div className="bg-gray-50 p-3 rounded text-sm max-h-32 overflow-y-auto">
+                              {prompt.content.length > 200 ?
+                                `${prompt.content.substring(0, 200)}...` :
+                                prompt.content
+                              }
+                            </div>
+                            {extractVariablesFromPrompt(prompt.content).length > 0 && (
+                              <div className="mt-2">
+                                <p className="text-xs text-gray-500">Переменные: {extractVariablesFromPrompt(prompt.content).join(', ')}</p>
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+
+                  {/* Prompt Form */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">
+                        {promptForm.id ? 'Редактирование промпта' : 'Создание нового промпта'}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="prompt_name">Название</Label>
+                          <Input
+                            id="prompt_name"
+                            value={promptForm.name}
+                            onChange={(e) => setPromptForm({...promptForm, name: e.target.value})}
+                            placeholder="Название промпта"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="prompt_type">Тип промпта</Label>
+                          <Select
+                            value={promptForm.prompt_type || "custom"}
+                            onValueChange={(value) => setPromptForm({...promptForm, prompt_type: value})}
+                          >
+                            <SelectTrigger>
+                              <SelectValue>
+                                {promptForm.prompt_type ? getPromptTypeDisplayName(promptForm.prompt_type) : "Выберите тип промпта"}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="filter">Фильтр постов</SelectItem>
+                              <SelectItem value="analysis">Анализ поста</SelectItem>
+                              <SelectItem value="generation">Генерация сценария</SelectItem>
+                              <SelectItem value="custom">Пользовательский</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="prompt_description">Описание</Label>
+                        <Input
+                          id="prompt_description"
+                          value={promptForm.description}
+                          onChange={(e) => setPromptForm({...promptForm, description: e.target.value})}
+                          placeholder="Краткое описание промпта"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <Label htmlFor="prompt_model">Модель</Label>
+                          <Select
+                            value={promptForm.model || "gpt-4o-mini"}
+                            onValueChange={(value) => setPromptForm({...promptForm, model: value})}
+                          >
+                            <SelectTrigger>
+                              <SelectValue>
+                                {promptForm.model ? getModelDisplayName(promptForm.model) : "Выберите модель"}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                              <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                              <SelectItem value="claude-3-5-sonnet-20241022">Claude-3.5-Sonnet</SelectItem>
+                              <SelectItem value="claude-3-haiku-20240307">Claude-3-Haiku</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label htmlFor="prompt_temperature">Температура</Label>
+                          <Input
+                            id="prompt_temperature"
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="2"
+                            value={promptForm.temperature}
+                            onChange={(e) => setPromptForm({...promptForm, temperature: parseFloat(e.target.value)})}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="prompt_max_tokens">Макс. токенов</Label>
+                          <Input
+                            id="prompt_max_tokens"
+                            type="number"
+                            min="100"
+                            max="4000"
+                            value={promptForm.max_tokens}
+                            onChange={(e) => setPromptForm({...promptForm, max_tokens: parseInt(e.target.value)})}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="prompt_content">Содержимое промпта</Label>
+                        <Textarea
+                          id="prompt_content"
+                          value={promptForm.content}
+                          onChange={(e) => setPromptForm({...promptForm, content: e.target.value})}
+                          placeholder="Введите текст промпта. Используйте {{variable}} для подстановки переменных."
+                          rows={10}
+                        />
+                        {extractVariablesFromPrompt(promptForm.content).length > 0 && (
+                          <div className="mt-2 p-2 bg-blue-50 rounded text-sm">
+                            <p className="text-blue-800 font-medium">Найденные переменные:</p>
+                            <p className="text-blue-600">{extractVariablesFromPrompt(promptForm.content).join(', ')}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="prompt_active"
+                          checked={promptForm.is_active}
+                          onChange={(e) => setPromptForm({...promptForm, is_active: e.target.checked})}
+                        />
+                        <Label htmlFor="prompt_active">Активен</Label>
+                      </div>
+
+                      <div className="flex justify-end space-x-2">
+                        <Button variant="outline" onClick={resetPromptForm}>
+                          Отмена
+                        </Button>
+                        <Button onClick={savePrompt}>
+                          {promptForm.id ? 'Обновить' : 'Создать'} промпт
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Prompt Testing */}
+                  {showPromptTest && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-lg">Тестирование промпта</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div>
+                          <Label>Выберите промпт для тестирования</Label>
+                          <Select
+                            value={selectedTestPromptId}
+                            onValueChange={(value) => {
+                              setSelectedTestPromptId(value)
+                              const prompt = dbPrompts.find((p: any) => p.id.toString() === value)
+                              if (prompt) {
+                                const variables = extractVariablesFromPrompt(prompt.content)
+                                const testVars: Record<string, string> = {}
+                                variables.forEach(v => {
+                                  testVars[v] = ''
+                                })
+                                setPromptTestVariables(testVars)
+                                setPromptTestResult(null) // Очищаем предыдущие результаты
+                              }
+                            }}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Выберите промпт" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {dbPrompts.map((prompt: any) => (
+                                <SelectItem key={prompt.id} value={prompt.id.toString()}>
+                                  {prompt.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {Object.keys(promptTestVariables).length > 0 && (
+                          <div className="space-y-3">
+                            <h4 className="font-medium">Переменные для подстановки:</h4>
+                            {Object.entries(promptTestVariables).map(([key, value]) => (
+                              <div key={key}>
+                                <Label htmlFor={`var_${key}`}>{key}</Label>
+                                <Input
+                                  id={`var_${key}`}
+                                  value={value}
+                                  onChange={(e) => setPromptTestVariables({
+                                    ...promptTestVariables,
+                                    [key]: e.target.value
+                                  })}
+                                  placeholder={`Значение для ${key}`}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <Button
+                          onClick={() => {
+                            if (selectedTestPromptId) {
+                              testPrompt(parseInt(selectedTestPromptId))
+                            }
+                          }}
+                          disabled={!selectedTestPromptId || Object.keys(promptTestVariables).length === 0}
+                        >
+                          <Zap className="w-4 h-4 mr-2" />
+                          Протестировать
+                        </Button>
+
+                        {promptTestResult && (
+                          <div className="mt-4 p-4 bg-gray-50 rounded">
+                            <h4 className="font-medium mb-2">Результат тестирования:</h4>
+                            <div className="space-y-2 text-sm">
+                              <p><strong>Модель:</strong> {promptTestResult.model}</p>
+                              <p><strong>Температура:</strong> {promptTestResult.temperature}</p>
+                              <p><strong>Макс. токенов:</strong> {promptTestResult.max_tokens}</p>
+                              {promptTestResult.processing_time && (
+                                <p><strong>Время обработки:</strong> {promptTestResult.processing_time} сек</p>
+                              )}
+                              {promptTestResult.tokens_used > 0 && (
+                                <p><strong>Использовано токенов:</strong> {promptTestResult.tokens_used}</p>
+                              )}
+                              <div>
+                                <strong>Обработанный промпт:</strong>
+                                <div className="mt-1 p-2 bg-white rounded text-xs max-h-40 overflow-y-auto">
+                                  {promptTestResult.processed_content}
+                                </div>
+                              </div>
+                              {promptTestResult.llm_response && (
+                                <div>
+                                  <strong>Ответ LLM:</strong>
+                                  <div className="mt-1 p-2 bg-green-50 border border-green-200 rounded text-xs max-h-60 overflow-y-auto">
+                                    {promptTestResult.llm_response}
+                                  </div>
+                                </div>
+                              )}
+                              {promptTestResult.error && (
+                                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs">
+                                  <strong className="text-red-600">Ошибка:</strong> {promptTestResult.error}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              )}
+
+              {/* Rubrics Tab */}
+              {llmTab === 'rubrics' && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-medium">Управление рубриками</h3>
+                    <Button onClick={() => editRubric({})}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Добавить рубрику
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-4">
+                    {rubrics.map((rubric: any) => (
+                      <Card key={rubric.id}>
+                        <CardHeader>
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <CardTitle className="text-base">{rubric.name}</CardTitle>
+                              <p className="text-sm text-gray-600">{rubric.description}</p>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Badge variant={rubric.is_active ? 'default' : 'secondary'}>
+                                {rubric.is_active ? 'Активна' : 'Неактивна'}
+                              </Badge>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => editRubric(rubric)}
+                              >
+                                <Edit className="w-3 h-3 mr-1" />
+                                Редактировать
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => deleteRubric(rubric.id)}
+                              >
+                                <Trash2 className="w-3 h-3 mr-1" />
+                                Удалить
+                              </Button>
+                            </div>
+                          </div>
+                        </CardHeader>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Formats Tab */}
+              {llmTab === 'formats' && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-medium">Управление форматами</h3>
+                    <Button onClick={() => editFormat({})}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Добавить формат
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-4">
+                    {formats.map((format: any) => (
+                      <Card key={format.id}>
+                        <CardHeader>
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <CardTitle className="text-base">{format.name}</CardTitle>
+                              <p className="text-sm text-gray-600">{format.description}</p>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Badge variant={format.is_active ? 'default' : 'secondary'}>
+                                {format.is_active ? 'Активен' : 'Неактивен'}
+                              </Badge>
+                              <span className="text-sm text-gray-500">
+                                {format.duration_seconds} сек
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => editFormat(format)}
+                              >
+                                <Edit className="w-3 h-3 mr-1" />
+                                Редактировать
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => deleteFormat(format.id)}
+                              >
+                                <Trash2 className="w-3 h-3 mr-1" />
+                                Удалить
+                              </Button>
+                            </div>
+                          </div>
+                        </CardHeader>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex justify-end space-x-2 pt-6 border-t">
+                <Button variant="outline" onClick={() => setShowLLMModal(false)}>
+                  Закрыть
+                </Button>
               </div>
             </div>
           </div>

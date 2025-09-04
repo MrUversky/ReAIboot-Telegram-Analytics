@@ -494,6 +494,192 @@ async def test_prompt_template(template_name: str, variables: Dict[str, Any]):
 
 # Управление промптами
 
+# === ЭНДПОИНТЫ БАЗЫ ДАННЫХ (должны быть ПЕРЕД файловыми) ===
+
+@app.get("/api/prompts/db", tags=["prompts"])
+async def get_all_prompts_db():
+    """Получить все промпты из базы данных."""
+    try:
+        result = supabase_manager.client.table('llm_prompts').select('*').order('created_at', desc=True).execute()
+
+        if hasattr(result, 'error') and result.error:
+            raise HTTPException(status_code=500, detail=f"Ошибка получения промптов: {result.error}")
+
+        return {"prompts": result.data}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения промптов: {str(e)}")
+
+@app.get("/api/prompts/db/{prompt_id}", tags=["prompts"])
+async def get_prompt_db(prompt_id: int):
+    """Получить конкретный промпт из базы данных."""
+    try:
+        result = supabase_manager.client.table('llm_prompts').select('*').eq('id', prompt_id).execute()
+
+        if hasattr(result, 'error') and result.error:
+            raise HTTPException(status_code=500, detail=f"Ошибка получения промпта: {result.error}")
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail=f"Промпт с ID {prompt_id} не найден")
+
+        return {"prompt": result.data[0]}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения промпта: {str(e)}")
+
+@app.post("/api/prompts/test/{prompt_id}", tags=["prompts"])
+async def test_prompt_db(prompt_id: int, variables: Dict[str, Any]):
+    """Протестировать промпт с переменными."""
+    try:
+        from openai import AsyncOpenAI
+        import time
+
+        # Получаем промпт из базы данных
+        result = supabase_manager.client.table('llm_prompts').select('*').eq('id', prompt_id).execute()
+
+        if (hasattr(result, 'error') and result.error) or not result.data:
+            raise HTTPException(status_code=404, detail=f"Промпт с ID {prompt_id} не найден")
+
+        prompt = result.data[0]
+        content = prompt['content']
+
+        # Подставляем переменные в промпт
+        for key, value in variables.items():
+            placeholder = "{{" + key + "}}"
+            content = content.replace(placeholder, str(value))
+
+        # Проверяем доступность API ключей
+        api_key = None
+        if prompt['model'].startswith('gpt'):
+            api_key = settings.openai_api_key
+        elif prompt['model'].startswith('claude'):
+            api_key = settings.anthropic_api_key
+
+        if not api_key:
+            # Возвращаем только обработанный промпт без вызова LLM
+            return {
+                "prompt_id": prompt_id,
+                "processed_content": content,
+                "variables_used": variables,
+                "model": prompt['model'],
+                "temperature": prompt['temperature'],
+                "max_tokens": prompt['max_tokens'],
+                "llm_response": None,
+                "error": "API ключ не найден для данной модели"
+            }
+
+        start_time = time.time()
+
+        try:
+            # Вызываем соответствующий API
+            if prompt['model'].startswith('gpt'):
+                client = AsyncOpenAI(api_key=api_key)
+                response = await client.chat.completions.create(
+                    model=prompt['model'],
+                    messages=[{"role": "user", "content": content}],
+                    temperature=prompt['temperature'],
+                    max_tokens=prompt['max_tokens']
+                )
+                llm_response = response.choices[0].message.content
+
+            elif prompt['model'].startswith('claude'):
+                import anthropic
+                client = anthropic.AsyncAnthropic(api_key=api_key)
+                response = await client.messages.create(
+                    model=prompt['model'],
+                    max_tokens=prompt['max_tokens'],
+                    temperature=prompt['temperature'],
+                    messages=[{"role": "user", "content": content}]
+                )
+                llm_response = response.content[0].text
+
+            processing_time = time.time() - start_time
+
+            # Получаем количество токенов
+            tokens_used = 0
+            if prompt['model'].startswith('gpt') and hasattr(response, 'usage'):
+                tokens_used = getattr(response.usage, 'total_tokens', 0)
+            elif prompt['model'].startswith('claude') and hasattr(response, 'usage'):
+                tokens_used = getattr(response.usage, 'input_tokens', 0) + getattr(response.usage, 'output_tokens', 0)
+
+            return {
+                "prompt_id": prompt_id,
+                "processed_content": content,
+                "variables_used": variables,
+                "model": prompt['model'],
+                "temperature": prompt['temperature'],
+                "max_tokens": prompt['max_tokens'],
+                "llm_response": llm_response,
+                "processing_time": round(processing_time, 2),
+                "tokens_used": tokens_used
+            }
+
+        except Exception as api_error:
+            return {
+                "prompt_id": prompt_id,
+                "processed_content": content,
+                "variables_used": variables,
+                "model": prompt['model'],
+                "temperature": prompt['temperature'],
+                "max_tokens": prompt['max_tokens'],
+                "llm_response": None,
+                "error": f"Ошибка API: {str(api_error)}"
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка тестирования промпта: {str(e)}")
+
+@app.put("/api/prompts/db/{prompt_id}", tags=["prompts"])
+async def update_prompt_db(prompt_id: int, prompt_data: Dict[str, Any]):
+    """Обновить промпт в базе данных."""
+    try:
+        from datetime import datetime
+
+        update_data = {
+            'updated_at': datetime.now().isoformat()
+        }
+
+        # Добавляем только переданные поля
+        for field in ['name', 'description', 'prompt_type', 'content', 'model', 'temperature', 'max_tokens', 'is_active']:
+            if field in prompt_data:
+                update_data[field] = prompt_data[field]
+
+        result = supabase_manager.client.table('llm_prompts').update(update_data).eq('id', prompt_id).execute()
+
+        if hasattr(result, 'error') and result.error:
+            raise HTTPException(status_code=500, detail=f"Ошибка обновления промпта: {result.error}")
+
+        return {"message": "Промпт обновлен успешно"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка обновления промпта: {str(e)}")
+
+@app.delete("/api/prompts/db/{prompt_id}", tags=["prompts"])
+async def delete_prompt_db(prompt_id: int):
+    """Удалить промпт из базы данных."""
+    try:
+        result = supabase_manager.client.table('llm_prompts').delete().eq('id', prompt_id).execute()
+
+        if hasattr(result, 'error') and result.error:
+            raise HTTPException(status_code=500, detail=f"Ошибка удаления промпта: {result.error}")
+
+        return {"message": "Промпт удален успешно"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка удаления промпта: {str(e)}")
+
+# === ЭНДПОИНТЫ ФАЙЛОВОЙ СИСТЕМЫ ===
+
 @app.get("/api/prompts", tags=["prompts"])
 async def get_all_prompts():
     """Получить все шаблоны промптов."""
@@ -571,6 +757,91 @@ async def update_project_context(context: Dict[str, Any]):
         return {"message": "Контекст проекта обновлен"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка обновления контекста: {str(e)}")
+
+# === ДОПОЛНИТЕЛЬНЫЕ ЭНДПОИНТЫ ДЛЯ ПРОМПТОВ ===
+
+@app.post("/api/prompts", tags=["prompts"])
+async def create_prompt(prompt_data: Dict[str, Any]):
+    """Создать новый промпт."""
+    try:
+        from src.app.settings import settings
+        from datetime import datetime
+
+        # Получаем текущего пользователя
+        user = supabase.auth.get_user()
+        user_id = user.user.id if user.user else None
+
+        # Создаем промпт в базе данных
+        prompt_record = {
+            'name': prompt_data['name'],
+            'description': prompt_data.get('description', ''),
+            'prompt_type': prompt_data.get('prompt_type', 'custom'),
+            'content': prompt_data['content'],
+            'model': prompt_data.get('model', 'gpt-4o-mini'),
+            'temperature': prompt_data.get('temperature', 0.7),
+            'max_tokens': prompt_data.get('max_tokens', 2000),
+            'is_active': prompt_data.get('is_active', True),
+            'created_by': user_id,
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        }
+
+        result = supabase_manager.client.table('llm_prompts').insert([prompt_record]).execute()
+
+        if result.error:
+            raise HTTPException(status_code=500, detail=f"Ошибка создания промпта: {result.error}")
+
+        return {"message": "Промпт создан успешно", "id": result.data[0]['id']}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка создания промпта: {str(e)}")
+
+@app.put("/api/prompts/db/{prompt_id}", tags=["prompts"])
+async def update_prompt_db(prompt_id: int, prompt_data: Dict[str, Any]):
+    """Обновить промпт в базе данных."""
+    try:
+        from datetime import datetime
+
+        update_data = {
+            'updated_at': datetime.now().isoformat()
+        }
+
+        # Добавляем только переданные поля
+        for field in ['name', 'description', 'prompt_type', 'content', 'model', 'temperature', 'max_tokens', 'is_active']:
+            if field in prompt_data:
+                update_data[field] = prompt_data[field]
+
+        result = supabase_manager.client.table('llm_prompts').update(update_data).eq('id', prompt_id).execute()
+
+        if hasattr(result, 'error') and result.error:
+            raise HTTPException(status_code=500, detail=f"Ошибка обновления промпта: {result.error}")
+
+        return {"message": "Промпт обновлен успешно"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка обновления промпта: {str(e)}")
+
+@app.delete("/api/prompts/db/{prompt_id}", tags=["prompts"])
+async def delete_prompt_db(prompt_id: int):
+    """Удалить промпт из базы данных."""
+    try:
+        result = supabase_manager.client.table('llm_prompts').delete().eq('id', prompt_id).execute()
+
+        if hasattr(result, 'error') and result.error:
+            raise HTTPException(status_code=500, detail=f"Ошибка удаления промпта: {result.error}")
+
+        return {"message": "Промпт удален успешно"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка удаления промпта: {str(e)}")
+
+# Эндпоинты базы данных перемещены выше
 
 # === НОВЫЕ API ЭНДПОИНТЫ ДЛЯ VIRAL DETECTION ===
 

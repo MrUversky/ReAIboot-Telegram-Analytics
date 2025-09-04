@@ -126,35 +126,52 @@ class FilterProcessor(BaseLLMProcessor):
                     processing_time=time.time() - start_time
                 )
 
-            # Парсим ответ
+            # Парсим и валидируем ответ
             result_text = response.choices[0].message.content
             tokens_used = self._calculate_tokens(user_prompt, result_text)
 
-            try:
-                import json
-                result_json = json.loads(result_text)
-                score = result_json.get("score", 0)
-                suitable = result_json.get("suitable", score >= 7)
-                reason = result_json.get("reason", "Оценка не определена")
+            # Валидируем ответ по схеме
+            schema = self.get_stage_schema("filter")
+            success, validated_data, validation_error = self.validate_json_response(result_text, schema)
 
+            if success and validated_data:
                 return ProcessingResult(
                     success=True,
                     data={
-                        "score": score,
-                        "suitable": suitable,
-                        "reason": reason,
+                        **validated_data,
                         "filter_model": "gpt-4o-mini"
                     },
                     tokens_used=tokens_used,
                     processing_time=time.time() - start_time
                 )
+            else:
+                logger.warning(f"Filter validation failed: {validation_error}")
+                # Попытка fallback парсинга
+                try:
+                    import json
+                    fallback_data = json.loads(result_text)
+                    score = fallback_data.get("score", 0)
+                    suitable = fallback_data.get("suitable", score >= 7)
+                    reason = fallback_data.get("reason", "Оценка не определена")
 
-            except json.JSONDecodeError:
-                return ProcessingResult(
-                    success=False,
-                    error=f"Не удалось распарсить JSON ответ: {result_text}",
-                    processing_time=time.time() - start_time
-                )
+                    return ProcessingResult(
+                        success=True,
+                        data={
+                            "score": score,
+                            "suitable": suitable,
+                            "reason": reason,
+                            "filter_model": "gpt-4o-mini",
+                            "validation_warning": validation_error
+                        },
+                        tokens_used=tokens_used,
+                        processing_time=time.time() - start_time
+                    )
+                except json.JSONDecodeError:
+                    return ProcessingResult(
+                        success=False,
+                        error=f"Не удалось распарсить JSON ответ: {result_text}. Ошибка валидации: {validation_error}",
+                        processing_time=time.time() - start_time
+                    )
 
         except Exception as e:
             logger.error(f"Ошибка в FilterProcessor: {e}", exc_info=True)

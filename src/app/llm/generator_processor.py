@@ -169,30 +169,19 @@ class GeneratorProcessor(BaseLLMProcessor):
                     processing_time=time.time() - start_time
                 )
 
-            # Парсим ответ
+            # Парсим и валидируем ответ
             result_text = response.choices[0].message.content
             tokens_used = self._calculate_tokens(user_prompt, result_text)
 
-            try:
-                import json
-                import re
+            # Валидируем ответ по схеме
+            schema = self.get_stage_schema("generation")
+            success, validated_data, validation_error = self.validate_json_response(result_text, schema)
 
-                # Очищаем от markdown оберток
-                cleaned_text = result_text.strip()
-                if cleaned_text.startswith('```json'):
-                    cleaned_text = cleaned_text[7:]
-                if cleaned_text.startswith('```'):
-                    cleaned_text = cleaned_text[3:]
-                if cleaned_text.endswith('```'):
-                    cleaned_text = cleaned_text[:-3]
-                cleaned_text = cleaned_text.strip()
-
-                scenario_data = json.loads(cleaned_text)
-
+            if success and validated_data:
                 return ProcessingResult(
                     success=True,
                     data={
-                        **scenario_data,
+                        **validated_data,
                         "generator_model": "gpt-4o",
                         "source_post": {
                             "text_preview": post_text[:200],
@@ -203,43 +192,79 @@ class GeneratorProcessor(BaseLLMProcessor):
                     tokens_used=tokens_used,
                     processing_time=time.time() - start_time
                 )
+            else:
+                logger.warning(f"Generation validation failed: {validation_error}")
+                # Попытка fallback парсинга
+                try:
+                    import json
+                    import re
 
-            except json.JSONDecodeError as e:
-                logger.warning(f"Не удалось распарсить JSON от GPT-4o: {result_text[:200]}... Error: {e}")
+                    # Очищаем от markdown оберток
+                    cleaned_text = result_text.strip()
+                    if cleaned_text.startswith('```json'):
+                        cleaned_text = cleaned_text[7:]
+                    if cleaned_text.startswith('```'):
+                        cleaned_text = cleaned_text[3:]
+                    if cleaned_text.endswith('```'):
+                        cleaned_text = cleaned_text[:-3]
+                    cleaned_text = cleaned_text.strip()
 
-                # Пытаемся извлечь JSON из текста
-                json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-                if json_match:
-                    try:
-                        scenario_data = json.loads(json_match.group())
-                        return ProcessingResult(
-                            success=True,
-                            data={
-                                **scenario_data,
-                                "generator_model": "gpt-4o",
-                                "source_post": {
-                                    "text_preview": post_text[:200],
-                                    "rubric": rubric.get("name"),
-                                    "format": reel_format.get("name")
-                                }
+                    fallback_data = json.loads(cleaned_text)
+
+                    return ProcessingResult(
+                        success=True,
+                        data={
+                            **fallback_data,
+                            "generator_model": "gpt-4o",
+                            "source_post": {
+                                "text_preview": post_text[:200],
+                                "rubric": rubric.get("name"),
+                                "format": reel_format.get("name")
                             },
-                            tokens_used=tokens_used,
-                            processing_time=time.time() - start_time
-                        )
-                    except:
-                        pass
+                            "validation_warning": validation_error
+                        },
+                        tokens_used=tokens_used,
+                        processing_time=time.time() - start_time
+                    )
 
-                # Возвращаем сырой текст как fallback
-                return ProcessingResult(
-                    success=True,
-                    data={
-                        "raw_scenario": result_text,
-                        "generator_model": "gpt-4o",
-                        "parsing_error": "JSON parsing failed"
-                    },
-                    tokens_used=tokens_used,
-                    processing_time=time.time() - start_time
-                )
+                except json.JSONDecodeError:
+                    logger.warning(f"Не удалось распарсить JSON от GPT-4o: {result_text[:200]}...")
+
+                    # Пытаемся извлечь JSON из текста
+                    json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+                    if json_match:
+                        try:
+                            fallback_data = json.loads(json_match.group())
+                            return ProcessingResult(
+                                success=True,
+                                data={
+                                    **fallback_data,
+                                    "generator_model": "gpt-4o",
+                                    "source_post": {
+                                        "text_preview": post_text[:200],
+                                        "rubric": rubric.get("name"),
+                                        "format": reel_format.get("name")
+                                    },
+                                    "validation_warning": validation_error
+                                },
+                                tokens_used=tokens_used,
+                                processing_time=time.time() - start_time
+                            )
+                        except:
+                            pass
+
+                    # Возвращаем сырой текст как fallback
+                    return ProcessingResult(
+                        success=True,
+                        data={
+                            "raw_scenario": result_text,
+                            "generator_model": "gpt-4o",
+                            "parsing_error": "JSON parsing failed",
+                            "validation_error": validation_error
+                        },
+                        tokens_used=tokens_used,
+                        processing_time=time.time() - start_time
+                    )
 
         except Exception as e:
             logger.error(f"Ошибка в GeneratorProcessor: {e}", exc_info=True)
