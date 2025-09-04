@@ -2111,6 +2111,37 @@ async def parse_channels_bulk_background(channels: List[str], days_back: int, ma
             'completed_at': datetime.now().isoformat()
         })
 
+# Эндпоинты для рубрик и форматов
+@app.get("/api/rubrics", tags=["rubrics"])
+async def get_rubrics():
+    """Получить все рубрики."""
+    try:
+        result = supabase_manager.client.table('rubrics').select('*').order('name').execute()
+
+        if hasattr(result, 'error') and result.error:
+            raise HTTPException(status_code=500, detail=f"Ошибка получения рубрик: {result.error}")
+
+        return result.data or []
+
+    except Exception as e:
+        logger.error(f"Ошибка получения рубрик: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения рубрик: {str(e)}")
+
+@app.get("/api/formats", tags=["formats"])
+async def get_formats():
+    """Получить все форматы."""
+    try:
+        result = supabase_manager.client.table('reel_formats').select('*').order('name').execute()
+
+        if hasattr(result, 'error') and result.error:
+            raise HTTPException(status_code=500, detail=f"Ошибка получения форматов: {result.error}")
+
+        return result.data or []
+
+    except Exception as e:
+        logger.error(f"Ошибка получения форматов: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения форматов: {str(e)}")
+
 # Обработчик ошибок
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

@@ -308,6 +308,8 @@ export default function AdminPage() {
         recent_posts: 0, // TODO: calculate recent posts
         total_tokens: tokensResult.count || 0
       })
+      // Загружаем настройки LLM (рубрики, форматы, промпты)
+      await loadLLMSettings()
 
     } catch (error) {
       console.error('Error loading admin data:', error)
@@ -371,8 +373,11 @@ export default function AdminPage() {
       if (rubricsResult.error) throw rubricsResult.error
       if (formatsResult.error) throw formatsResult.error
 
+      console.log("Rubrics loaded:", rubricsResult.data || [])
       setRubrics(rubricsResult.data || [])
+      console.log("Formats loaded:", formatsResult.data || [])
       setFormats(formatsResult.data || [])
+      console.log("DbPrompts loaded:", dbPromptsResult.error ? [] : (dbPromptsResult.data || []))
       setDbPrompts(dbPromptsResult.error ? [] : (dbPromptsResult.data || []))
       setFilePrompts(filePromptsResult || {})
     } catch (error) {
@@ -565,23 +570,37 @@ export default function AdminPage() {
 
   const editRubric = (rubric: any) => {
     setRubricForm({
-      id: rubric.id,
-      name: rubric.name,
+      id: rubric.id || '',
+      name: rubric.name || '',
       description: rubric.description || '',
       category: rubric.category || '',
-      is_active: rubric.is_active
+      is_active: rubric.is_active !== undefined ? rubric.is_active : true
     })
+    // Прокрутка к форме редактирования через небольшую задержку
+    setTimeout(() => {
+      const formElement = document.getElementById('rubric-form')
+      if (formElement) {
+        formElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }, 100)
   }
 
   const editFormat = (format: any) => {
     setFormatForm({
-      id: format.id,
-      name: format.name,
+      id: format.id || '',
+      name: format.name || '',
       description: format.description || '',
       duration_seconds: format.duration_seconds || 60,
       structure: format.structure || {},
-      is_active: format.is_active
+      is_active: format.is_active !== undefined ? format.is_active : true
     })
+    // Прокрутка к форме редактирования через небольшую задержку
+    setTimeout(() => {
+      const formElement = document.getElementById('format-form')
+      if (formElement) {
+        formElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }, 100)
   }
 
   const savePrompt = async () => {
@@ -650,6 +669,13 @@ export default function AdminPage() {
       is_active: prompt.is_active
     })
     setShowLLMModal(true)
+    // Прокрутка к форме редактирования через небольшую задержку
+    setTimeout(() => {
+      const formElement = document.getElementById('prompt-form')
+      if (formElement) {
+        formElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }, 100)
   }
 
   const testPrompt = async (promptId: number) => {
@@ -1793,7 +1819,8 @@ export default function AdminPage() {
                   </div>
 
                   {/* Prompt Form */}
-                  <Card>
+                  <div id="prompt-form">
+                    <Card className="border-blue-300 shadow-lg">
                     <CardHeader>
                       <CardTitle className="text-lg">
                         {promptForm.id ? 'Редактирование промпта' : 'Создание нового промпта'}
@@ -1817,9 +1844,7 @@ export default function AdminPage() {
                             onValueChange={(value) => setPromptForm({...promptForm, prompt_type: value})}
                           >
                             <SelectTrigger>
-                              <SelectValue>
-                                {promptForm.prompt_type ? getPromptTypeDisplayName(promptForm.prompt_type) : "Выберите тип промпта"}
-                              </SelectValue>
+                              <SelectValue placeholder="Выберите тип промпта" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="filter">Фильтр постов</SelectItem>
@@ -1849,9 +1874,7 @@ export default function AdminPage() {
                             onValueChange={(value) => setPromptForm({...promptForm, model: value})}
                           >
                             <SelectTrigger>
-                              <SelectValue>
-                                {promptForm.model ? getModelDisplayName(promptForm.model) : "Выберите модель"}
-                              </SelectValue>
+                              <SelectValue placeholder="Выберите модель" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
@@ -1923,6 +1946,7 @@ export default function AdminPage() {
                       </div>
                     </CardContent>
                   </Card>
+                  </div>
 
                   {/* Prompt Testing */}
                   {showPromptTest && (
@@ -2080,6 +2104,69 @@ export default function AdminPage() {
                       </Card>
                     ))}
                   </div>
+
+                  {/* Rubric Form */}
+                  <div id="rubric-form">
+                    <Card className="border-blue-300 shadow-lg">
+                      <CardHeader>
+                        <CardTitle className="text-lg">
+                          {rubricForm.id ? 'Редактирование рубрики' : 'Создание новой рубрики'}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label htmlFor="rubric_name">Название</Label>
+                            <Input
+                              id="rubric_name"
+                              value={rubricForm.name}
+                              onChange={(e) => setRubricForm({...rubricForm, name: e.target.value})}
+                              placeholder="Название рубрики"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="rubric_category">Категория</Label>
+                            <Input
+                              id="rubric_category"
+                              value={rubricForm.category}
+                              onChange={(e) => setRubricForm({...rubricForm, category: e.target.value})}
+                              placeholder="Категория рубрики"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <Label htmlFor="rubric_description">Описание</Label>
+                          <Textarea
+                            id="rubric_description"
+                            value={rubricForm.description}
+                            onChange={(e) => setRubricForm({...rubricForm, description: e.target.value})}
+                            placeholder="Описание рубрики"
+                            rows={3}
+                          />
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="rubric_active"
+                            checked={rubricForm.is_active}
+                            onChange={(e) => setRubricForm({...rubricForm, is_active: e.target.checked})}
+                          />
+                          <Label htmlFor="rubric_active">Активна</Label>
+                        </div>
+
+                        <div className="flex justify-end space-x-2">
+                          <Button variant="outline" onClick={() => setRubricForm({id: '', name: '', description: '', category: '', is_active: true})}>
+                            Отмена
+                          </Button>
+                          <Button onClick={saveRubric}>
+                            {rubricForm.id ? 'Обновить' : 'Создать'} рубрику
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
                 </div>
               )}
 
@@ -2131,6 +2218,90 @@ export default function AdminPage() {
                         </CardHeader>
                       </Card>
                     ))}
+                  </div>
+
+                  {/* Format Form */}
+                  <div id="format-form">
+                    <Card className="border-blue-300 shadow-lg">
+                      <CardHeader>
+                        <CardTitle className="text-lg">
+                          {formatForm.id ? 'Редактирование формата' : 'Создание нового формата'}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label htmlFor="format_name">Название</Label>
+                            <Input
+                              id="format_name"
+                              value={formatForm.name}
+                              onChange={(e) => setFormatForm({...formatForm, name: e.target.value})}
+                              placeholder="Название формата"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="format_duration">Длительность (сек)</Label>
+                            <Input
+                              id="format_duration"
+                              type="number"
+                              min="30"
+                              max="180"
+                              value={formatForm.duration_seconds}
+                              onChange={(e) => setFormatForm({...formatForm, duration_seconds: parseInt(e.target.value)})}
+                              placeholder="60"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <Label htmlFor="format_description">Описание</Label>
+                          <Textarea
+                            id="format_description"
+                            value={formatForm.description}
+                            onChange={(e) => setFormatForm({...formatForm, description: e.target.value})}
+                            placeholder="Описание формата"
+                            rows={3}
+                          />
+                        </div>
+
+                        <div>
+                          <Label htmlFor="format_structure">Структура (JSON)</Label>
+                          <Textarea
+                            id="format_structure"
+                            value={JSON.stringify(formatForm.structure, null, 2)}
+                            onChange={(e) => {
+                              try {
+                                const structure = JSON.parse(e.target.value)
+                                setFormatForm({...formatForm, structure})
+                              } catch (err) {
+                                // Не валидный JSON, но позволяем редактировать
+                              }
+                            }}
+                            placeholder='{"hook": "3-5 сек", "insight": "5-10 сек", "steps": "10-15 сек", "cta": "3-5 сек"}'
+                            rows={4}
+                          />
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="format_active"
+                            checked={formatForm.is_active}
+                            onChange={(e) => setFormatForm({...formatForm, is_active: e.target.checked})}
+                          />
+                          <Label htmlFor="format_active">Активен</Label>
+                        </div>
+
+                        <div className="flex justify-end space-x-2">
+                          <Button variant="outline" onClick={() => setFormatForm({id: '', name: '', description: '', duration_seconds: 60, structure: {}, is_active: true})}>
+                            Отмена
+                          </Button>
+                          <Button onClick={saveFormat}>
+                            {formatForm.id ? 'Обновить' : 'Создать'} формат
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
                   </div>
                 </div>
               )}
