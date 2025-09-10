@@ -28,7 +28,8 @@ import {
   X,
   Zap,
   Target,
-  BarChart3
+  BarChart3,
+  DollarSign
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { apiClient } from '@/lib/api'
@@ -79,6 +80,11 @@ export default function AdminPage() {
   // Telegram Auth state
   const [telegramStatus, setTelegramStatus] = useState<any>(null)
   const [showTelegramModal, setShowTelegramModal] = useState(false)
+
+  // LLM Prices state
+  const [showPricesModal, setShowPricesModal] = useState(false)
+  const [priceReport, setPriceReport] = useState<any>(null)
+  const [loadingPrices, setLoadingPrices] = useState(false)
   const [authStep, setAuthStep] = useState<'phone' | 'code'>('phone')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
@@ -433,6 +439,42 @@ export default function AdminPage() {
   const handleConfigureLLM = async () => {
     await loadLLMSettings()
     setShowLLMModal(true)
+  }
+
+  const handleShowPrices = async () => {
+    setLoadingPrices(true)
+    try {
+      // В будущем здесь будет API вызов для получения цен
+      // Пока используем моковые данные
+      const mockPriceReport = {
+        timestamp: new Date().toISOString(),
+        prices: {
+          'gpt-4o': {
+            input: { price_per_million: 2.50, price_per_1k: 0.0025, source: 'api', confidence: 1.0 },
+            output: { price_per_million: 10.00, price_per_1k: 0.01, source: 'api', confidence: 1.0 }
+          },
+          'gpt-4o-mini': {
+            input: { price_per_million: 0.150, price_per_1k: 0.00015, source: 'api', confidence: 1.0 },
+            output: { price_per_million: 0.600, price_per_1k: 0.0006, source: 'api', confidence: 1.0 }
+          },
+          'claude-3-5-sonnet': {
+            input: { price_per_million: 3.0, price_per_1k: 0.003, source: 'api', confidence: 1.0 },
+            output: { price_per_million: 15.0, price_per_1k: 0.015, source: 'api', confidence: 1.0 }
+          }
+        },
+        summary: {
+          total_alerts: 0,
+          significant_changes: 0,
+          last_update: new Date().toISOString()
+        }
+      }
+      setPriceReport(mockPriceReport)
+    } catch (error) {
+      console.error('Ошибка загрузки цен:', error)
+    } finally {
+      setLoadingPrices(false)
+    }
+    setShowPricesModal(true)
   }
 
   const handleConfigureViral = async () => {
@@ -985,6 +1027,10 @@ export default function AdminPage() {
               <Button variant="outline" onClick={handleConfigureLLM}>
                 <Settings className="w-4 h-4 mr-2" />
                 Настройки LLM
+              </Button>
+              <Button variant="outline" onClick={handleShowPrices}>
+                <DollarSign className="w-4 h-4 mr-2" />
+                Цены LLM
               </Button>
               <Button variant="outline" onClick={handleConfigureViral}>
                 <Zap className="w-4 h-4 mr-2" />
@@ -2442,6 +2488,170 @@ export default function AdminPage() {
                   Закрыть
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Prices Modal */}
+      {showPricesModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+                  <DollarSign className="w-6 h-6 mr-2 text-green-500" />
+                  Цены LLM API
+                </h2>
+                <Button variant="outline" onClick={() => setShowPricesModal(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+
+              {loadingPrices ? (
+                <div className="flex justify-center items-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+                  <span className="ml-3 text-gray-600">Загрузка цен...</span>
+                </div>
+              ) : priceReport ? (
+                <div className="space-y-6">
+                  {/* Summary */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium text-gray-600">Всего моделей</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold">{Object.keys(priceReport.prices).length}</div>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium text-gray-600">Алертов</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold text-orange-600">{priceReport.summary.total_alerts}</div>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium text-gray-600">Последнее обновление</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-sm text-gray-600">
+                          {new Date(priceReport.summary.last_update).toLocaleString('ru-RU')}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Price Table */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Текущие цены (за 1M токенов)</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b">
+                              <th className="text-left py-2 font-medium">Модель</th>
+                              <th className="text-left py-2 font-medium">Input</th>
+                              <th className="text-left py-2 font-medium">Output</th>
+                              <th className="text-left py-2 font-medium">Источник</th>
+                              <th className="text-left py-2 font-medium">Уверенность</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(priceReport.prices).map(([model, prices]: [string, any]) => (
+                              <tr key={model} className="border-b">
+                                <td className="py-3 font-medium">{model}</td>
+                                <td className="py-3">${prices.input.price_per_million.toFixed(3)}</td>
+                                <td className="py-3">${prices.output.price_per_million.toFixed(3)}</td>
+                                <td className="py-3">
+                                  <span className={`px-2 py-1 rounded text-xs ${
+                                    prices.input.source === 'api' ? 'bg-green-100 text-green-800' :
+                                    prices.input.source === 'web' ? 'bg-blue-100 text-blue-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {prices.input.source}
+                                  </span>
+                                </td>
+                                <td className="py-3">
+                                  <div className="flex items-center">
+                                    <div className="w-16 bg-gray-200 rounded-full h-2 mr-2">
+                                      <div
+                                        className="bg-green-600 h-2 rounded-full"
+                                        style={{width: `${prices.input.confidence * 100}%`}}
+                                      ></div>
+                                    </div>
+                                    <span className="text-sm text-gray-600">
+                                      {(prices.input.confidence * 100).toFixed(0)}%
+                                    </span>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Cost Calculator */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Калькулятор стоимости</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-sm text-gray-600 mb-4">
+                        Примерная стоимость обработки одного поста в пайплайне:
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span>Filter (GPT-4o-mini):</span>
+                            <span>$0.0001</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Analysis (Claude):</span>
+                            <span>$0.0043</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Rubric Selection (GPT-4o):</span>
+                            <span>$0.0158</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Generation (GPT-4o):</span>
+                            <span>$0.0044</span>
+                          </div>
+                        </div>
+                        <div className="border-t pt-2">
+                          <div className="flex justify-between font-bold text-lg">
+                            <span>Итого за пост:</span>
+                            <span className="text-green-600">$0.0246</span>
+                          </div>
+                          <div className="text-sm text-gray-500 mt-1">
+                            ≈ 2.46 рублей (курс 100 руб/$)
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <div className="flex justify-end">
+                    <Button variant="outline" onClick={() => setShowPricesModal(false)}>
+                      Закрыть
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <p className="text-gray-600">Не удалось загрузить данные о ценах</p>
+                </div>
+              )}
             </div>
           </div>
         </div>

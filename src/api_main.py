@@ -448,6 +448,21 @@ async def quick_analyze_post(post_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         logger.info(f"Начинаем быстрый анализ поста {post_data.get('message_id', 'unknown')}")
+        logger.info(f"Ключи входных данных: {list(post_data.keys())}")
+        logger.info(f"Поле date: {post_data.get('date', 'MISSING')}")
+
+        # Убеждаемся, что поле date присутствует
+        if 'date' not in post_data and 'raw_data' in post_data:
+            raw_data = post_data.get('raw_data', {})
+            if isinstance(raw_data, str):
+                import json
+                try:
+                    raw_data = json.loads(raw_data)
+                except:
+                    pass
+            if 'date' in raw_data:
+                post_data['date'] = raw_data['date']
+                logger.info(f"Восстановили date из raw_data: {post_data['date']}")
 
         # Быстрый анализ: только фильтрация (оценка 1-10)
         result = await orchestrator.process_post_enhanced(
@@ -530,8 +545,22 @@ async def generate_scenarios_from_analysis(request: Dict[str, Any]) -> Dict[str,
                     "selection_score": combination.get("score", 0)
                 })
 
-        # Сценарии уже сохранены в generator_processor.process через orchestrator
-        # Не сохраняем повторно, чтобы избежать дублирования
+        # Сохраняем сценарии через оркестратор
+        if scenarios and supabase_manager:
+            logger.info(f"Сохраняем {len(scenarios)} сценариев для поста {post_data.get('message_id', 'unknown')}")
+
+            # Создаем фиктивный результат для сохранения сценариев
+            from app.llm.orchestrator import OrchestratorResult, ProcessingStage
+
+            fake_result = OrchestratorResult(
+                post_id=f"{post_data['message_id']}_{post_data['channel_username']}",
+                overall_success=True,
+                stages=[],
+                final_data={"scenarios": scenarios}
+            )
+
+            await orchestrator._save_results_to_database([fake_result], [post_data])
+            logger.info(f"Сценарии сохранены в БД для поста {post_data.get('message_id', 'unknown')}")
 
         return {
             "success": len(scenarios) > 0,

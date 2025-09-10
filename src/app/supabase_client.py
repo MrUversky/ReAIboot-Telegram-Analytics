@@ -201,6 +201,29 @@ class SupabaseClient:
             # Подготовим данные для вставки
             posts_data = []
             for post in posts:
+                logger.info(f"Подготавливаем пост для сохранения: message_id={post.get('message_id')}, channel={post.get('channel_username')}")
+                logger.info(f"Поля поста: {list(post.keys())}")
+                logger.info(f"Date в посте: {post.get('date', 'MISSING')}")
+
+                # Убеждаемся, что поле date присутствует
+                if 'date' not in post and 'raw_data' in post:
+                    raw_data = post.get('raw_data', {})
+                    if isinstance(raw_data, str):
+                        try:
+                            raw_data = json.loads(raw_data)
+                        except Exception as e:
+                            logger.warning(f"Не удалось распарсить raw_data: {e}")
+                            raw_data = {}
+
+                    if 'date' in raw_data:
+                        post['date'] = raw_data['date']
+                        logger.info(f"Восстановили date из raw_data: {post['date']}")
+
+                # Проверяем наличие обязательных полей
+                if 'date' not in post:
+                    logger.error(f"Поле date отсутствует в посте {post.get('message_id', 'unknown')}")
+                    continue
+
                 post_data = {
                     'id': f"{post['message_id']}_{post['channel_username'] if post['channel_username'].startswith('@') else '@' + post['channel_username']}",
                     'message_id': post['message_id'],
@@ -304,7 +327,9 @@ class SupabaseClient:
             # Добавим дополнительные поля
             analysis_data['updated_at'] = datetime.utcnow().isoformat()
 
-            result = self.client.table('post_analysis').upsert(analysis_data).execute()
+            result = (self.client.table('post_analysis')
+                     .upsert(analysis_data, on_conflict='post_id,analysis_type')
+                     .execute())
             return len(result.data) > 0
         except Exception as e:
             logger.error(f"Error saving post analysis: {e}")

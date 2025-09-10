@@ -101,7 +101,8 @@ class FilterProcessor(BaseLLMProcessor):
                     ],
                     temperature=0.3,
                     max_tokens=300
-                )
+                ),
+                timeout=30.0  # Таймаут 30 секунд для быстрого фильтра
             )
 
             if not success:

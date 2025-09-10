@@ -451,6 +451,18 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Scenarios policies (authenticated users can read, only admins can modify)
+CREATE POLICY "Authenticated users can view scenarios" ON public.scenarios
+    FOR SELECT TO authenticated USING (true);
+
+CREATE POLICY "Only admins can modify scenarios" ON public.scenarios
+    FOR ALL TO authenticated USING (
+        EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE id = auth.uid() AND role = 'admin'
+        )
+    );
+
 -- LLM Prompts policies (authenticated users can read, only admins can modify)
 CREATE POLICY "Authenticated users can view LLM prompts" ON public.llm_prompts
     FOR SELECT TO authenticated USING (true);

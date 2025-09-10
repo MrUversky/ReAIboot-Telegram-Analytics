@@ -13,6 +13,7 @@ from .analysis_processor import AnalysisProcessor
 from .generator_processor import GeneratorProcessor
 from .rubric_selector_processor import RubricSelectorProcessor
 from ..settings import settings
+from ..price_monitor import price_monitor
 from ..utils import setup_logger
 from ..supabase_client import supabase_client
 
@@ -687,22 +688,32 @@ class LLMOrchestrator:
         """Возвращает модель для указанного этапа."""
         model_mapping = {
             'filter': 'gpt-4o-mini',
-            'analysis': 'claude-3-5-sonnet-20241022',
+            'analysis': 'claude-3-5-sonnet',
+            'rubric_selection': 'gpt-4o',  # Пока оставляем GPT-4o, потом заменим на GPT-4o-mini
             'generator': 'gpt-4o'
         }
         return model_mapping.get(stage_name, 'unknown')
 
     def _calculate_cost(self, stage_name: str, tokens: int) -> float:
-        """Рассчитывает стоимость использования токенов."""
-        # Примерные цены (нужно обновлять актуальные)
-        prices_per_1k_tokens = {
-            'filter': 0.15,  # GPT-4o-mini
-            'analysis': 3.0,  # Claude-3.5-Sonnet
-            'generator': 2.5  # GPT-4o
+        """Рассчитывает стоимость использования токенов с актуальными ценами."""
+        model = self._get_model_for_stage(stage_name)
+
+        # Предполагаем соотношение input/output токенов 70/30
+        input_tokens = int(tokens * 0.7)
+        output_tokens = int(tokens * 0.3)
+
+        # Используем новый price_monitor для точного расчета
+        usage_data = {
+            stage_name: {
+                'model': model,
+                'input_tokens': input_tokens,
+                'output_tokens': output_tokens
+            }
         }
 
-        price = prices_per_1k_tokens.get(stage_name, 0)
-        return round((tokens / 1000) * price, 4)
+        cost_report = price_monitor.get_cost_calculation(usage_data)
+        stage_cost = cost_report['breakdown'][stage_name]['cost_usd']
+        return round(stage_cost, 6)
 
     def get_processor_status(self) -> Dict[str, bool]:
         """Возвращает статус доступности всех процессоров."""

@@ -68,23 +68,29 @@ class BaseLLMProcessor(ABC):
         self,
         request_func,
         max_retries: int = 3,
-        retry_delay: float = 1.0
+        retry_delay: float = 1.0,
+        timeout: float = 60.0  # Таймаут на запрос в секундах
     ) -> Tuple[bool, Any, str]:
         """
-        Выполняет запрос с повторными попытками.
+        Выполняет запрос с повторными попытками и таймаутом.
 
         Args:
             request_func: Функция для выполнения запроса
             max_retries: Максимальное количество попыток
             retry_delay: Задержка между попытками
+            timeout: Таймаут на запрос в секундах
 
         Returns:
             Кортеж (успех, результат, ошибка)
         """
         for attempt in range(max_retries):
             try:
-                result = await request_func()
+                # Добавляем таймаут для каждого запроса
+                result = await asyncio.wait_for(request_func(), timeout=timeout)
                 return True, result, ""
+            except asyncio.TimeoutError:
+                error_msg = f"Попытка {attempt + 1}/{max_retries} failed: Таймаут {timeout} сек"
+                logger.warning(error_msg)
             except Exception as e:
                 error_msg = f"Попытка {attempt + 1}/{max_retries} failed: {str(e)}"
                 logger.warning(error_msg)
@@ -182,14 +188,16 @@ class BaseLLMProcessor(ABC):
                     "audience_insights": {"type": "array", "items": {"type": "string"}},
                     "content_ideas": {"type": "array", "items": {"type": "string"}},
                     "lessons_learned": {"type": "string"},
-                    "recommended_topics": {"type": "array", "items": {"type": "string"}}
+                    "recommended_topics": {"type": "array", "items": {"type": "string"}},
+                    "content_quality_score": {"type": "number"}
                 },
-                "required": ["success_factors", "content_strengths", "audience_insights"]
+                "required": ["success_factors", "audience_insights"]
             },
             "generation": {
                 "type": "object",
                 "properties": {
                     "title": {"type": "string"},
+                    "description": {"type": "string"},
                     "duration": {"type": "number"},
                     "hook": {
                         "type": "object",
@@ -200,6 +208,14 @@ class BaseLLMProcessor(ABC):
                         }
                     },
                     "insight": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "visual": {"type": "string"},
+                            "voiceover": {"type": "string"}
+                        }
+                    },
+                    "content": {
                         "type": "object",
                         "properties": {
                             "text": {"type": "string"},
@@ -230,9 +246,11 @@ class BaseLLMProcessor(ABC):
                         }
                     },
                     "hashtags": {"type": "array", "items": {"type": "string"}},
-                    "music_suggestion": {"type": "string"}
+                    "music_suggestion": {"type": "string"},
+                    "quality_score": {"type": "number"},
+                    "engagement_prediction": {"type": "number"}
                 },
-                "required": ["title", "duration", "hook", "insight", "steps", "cta"]
+                "required": ["title"]
             },
             "rubric_selection": {
                 "type": "object",
@@ -266,9 +284,27 @@ class BaseLLMProcessor(ABC):
                             "required": ["rubric", "format", "score", "reason"]
                         }
                     },
+                    "top_combinations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "rubric": {
+                                    "type": "string",
+                                    "description": "ID рубрики"
+                                },
+                                "format": {
+                                    "type": "string",
+                                    "description": "ID формата"
+                                },
+                                "justification": {"type": "string"},
+                                "score": {"type": "number", "minimum": 1, "maximum": 10}
+                            }
+                        }
+                    },
                     "recommendation": {"type": "string"}
                 },
-                "required": ["combinations"]
+                "required": []
             }
         }
 

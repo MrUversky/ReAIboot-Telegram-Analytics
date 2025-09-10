@@ -109,7 +109,8 @@ class GeneratorProcessor(BaseLLMProcessor):
                     ],
                     temperature=0.7,
                     max_tokens=3000
-                )
+                ),
+                timeout=90.0  # Таймаут 90 секунд для генерации (самый долгий этап)
             )
 
             if not success:

@@ -98,7 +98,8 @@ class AnalysisProcessor(BaseLLMProcessor):
                     messages=[
                         {"role": "user", "content": user_prompt}
                     ]
-                )
+                ),
+                timeout=45.0  # Таймаут 45 секунд для анализа
             )
 
             if not success:
