@@ -10,6 +10,7 @@ import yaml
 import os
 
 from .settings import settings
+from .supabase_client import supabase_client as supabase_manager
 
 
 @dataclass
@@ -30,6 +31,29 @@ class PromptManager:
         self.templates: Dict[str, PromptTemplate] = {}
         self.project_context = self._load_project_context()
         self._load_default_templates()
+        self._load_db_prompts()
+
+    def _load_db_prompts(self):
+        """Загружает промпты из базы данных Supabase."""
+        try:
+            # Загружаем все активные промпты
+            result = supabase_manager.client.table('llm_prompts').select('*').eq('is_active', True).execute()
+
+            for prompt_data in result.data:
+                # Загружаем все активные промпты как системные шаблоны
+                if prompt_data.get('is_active', True):
+                    # Создаем шаблон на основе данных из БД
+                    template = PromptTemplate(
+                        name=prompt_data['name'],
+                        description=prompt_data.get('description', ''),
+                        system_prompt=prompt_data.get('system_prompt', prompt_data.get('content', '')),
+                        user_prompt=prompt_data.get('user_prompt', ''),
+                        variables=prompt_data.get('variables', {}),
+                        model_settings=prompt_data.get('model_settings', {})
+                    )
+                    self.templates[prompt_data['name']] = template
+        except Exception as e:
+            print(f"Warning: Could not load prompts from database: {e}")
 
     def _load_project_context(self) -> Dict[str, Any]:
         """Загружает контекст проекта ПерепрошИИвка."""
@@ -244,15 +268,21 @@ class PromptManager:
         """Возвращает все доступные шаблоны."""
         return self.templates.copy()
 
-    def render_prompt(self, template_name: str, variables: Dict[str, Any]) -> Dict[str, str]:
+    def render_prompt(self, template_name: str, variables: Dict[str, Any] = None) -> Dict[str, str]:
         """Рендерит промпт с подстановкой переменных."""
         template = self.get_template(template_name)
         if not template:
             raise ValueError(f"Шаблон {template_name} не найден")
 
+        variables = variables or {}
+
+        # Автоматически добавляем project_context если его нет в переменных
+        if 'project_context' not in variables:
+            variables['project_context'] = self.get_project_context()
+
         # Подставляем переменные в промпты
-        system_prompt = template.system_prompt
-        user_prompt = template.user_prompt
+        system_prompt = template.system_prompt or template.content  # Fallback на content для совместимости
+        user_prompt = template.user_prompt or ""  # Пустой user prompt по умолчанию
 
         for key, value in variables.items():
             placeholder = "{{" + key + "}}"
@@ -263,6 +293,126 @@ class PromptManager:
             "system_prompt": system_prompt,
             "user_prompt": user_prompt
         }
+
+    def get_system_prompt(self, prompt_name: str, variables: Dict[str, Any] = None) -> str:
+        """Получает системный промпт с подстановкой переменных."""
+        template = self.get_template(prompt_name)
+        if not template:
+            raise ValueError(f"Системный промпт {prompt_name} не найден")
+
+        variables = variables or {}
+
+        # Автоматически добавляем project_context если его нет в переменных
+        if 'project_context' not in variables:
+            variables['project_context'] = self.get_project_context()
+
+        system_prompt = template.system_prompt or template.content  # Fallback на content
+
+        for key, value in variables.items():
+            placeholder = "{{" + key + "}}"
+            system_prompt = system_prompt.replace(placeholder, str(value))
+
+        return system_prompt
+
+    def get_user_prompt(self, prompt_name: str, variables: Dict[str, Any] = None) -> str:
+        """Получает user промпт с подстановкой переменных."""
+        template = self.get_template(prompt_name)
+        if not template:
+            raise ValueError(f"Шаблон {prompt_name} не найден")
+
+        variables = variables or {}
+
+        user_prompt = template.user_prompt or ""  # Пустой по умолчанию
+        for key, value in variables.items():
+            placeholder = "{{" + key + "}}"
+            user_prompt = user_prompt.replace(placeholder, str(value))
+
+        return user_prompt
+
+    def update_db_prompt(self, prompt_name: str, content: str, variables: Dict[str, Any] = None):
+        """Обновляет промпт в базе данных."""
+        try:
+            update_data = {
+                'content': content,
+                'updated_at': 'now()'
+            }
+            if variables:
+                update_data['variables'] = variables
+
+            supabase_manager.client.table('llm_prompts').update(update_data).eq('name', prompt_name).execute()
+
+            # Обновляем локальный кэш
+            if prompt_name in self.templates:
+                self.templates[prompt_name].system_prompt = content
+                if variables:
+                    self.templates[prompt_name].variables = variables
+
+        except Exception as e:
+            print(f"Error updating prompt {prompt_name}: {e}")
+            raise
+
+    def reload_db_prompts(self):
+        """Перезагружает промпты из базы данных."""
+        self.templates.clear()
+        self._load_default_templates()
+        self._load_db_prompts()
+
+    def get_available_variables(self, prompt_type: str = None) -> Dict[str, str]:
+        """Возвращает доступные переменные для промптов."""
+        base_variables = {
+            "post_text": "Текст поста для анализа",
+            "views": "Количество просмотров поста",
+            "reactions": "Количество реакций на пост",
+            "replies": "Количество комментариев",
+            "forwards": "Количество репостов",
+            "channel_title": "Название канала",
+            "score": "Оценка поста по шкале 1-10",
+            "project_context": "Контекст проекта ПерепрошИИвка"
+        }
+
+        # Дополнительные переменные по типам промптов
+        type_specific = {
+            "filter": {
+                "available_rubrics": "Список доступных рубрик (JSON)",
+                "available_formats": "Список доступных форматов (JSON)"
+            },
+            "analysis": {
+                "analysis": "Результат анализа поста",
+                "engagement_rate": "Показатель вовлеченности"
+            },
+            "rubric_selection": {
+                "analysis": "Результат анализа поста",
+                "available_rubrics": "Список доступных рубрик (JSON)",
+                "available_formats": "Список доступных форматов (JSON)",
+                "current_rubrics": "Текущие рубрики проекта",
+                "current_formats": "Текущие форматы проекта"
+            },
+            "generation": {
+                "analysis": "Результат анализа поста",
+                "rubric_name": "Название выбранной рубрики",
+                "format_name": "Название выбранного формата",
+                "duration": "Продолжительность видео в секундах",
+                "selected_rubric": "Выбранная рубрика (объект)",
+                "selected_format": "Выбранный формат (объект)"
+            }
+        }
+
+        if prompt_type and prompt_type in type_specific:
+            base_variables.update(type_specific[prompt_type])
+
+        return base_variables
+
+    def get_project_context(self) -> str:
+        """Получает контекст проекта из промпта в базе данных."""
+        try:
+            # Сначала пытаемся получить из базы данных
+            if 'project_context_system' in self.templates:
+                return self.templates['project_context_system'].content
+        except:
+            pass
+
+        # Fallback на встроенный контекст
+        return self._load_project_context()['project_description']
 
     def save_templates_to_file(self, file_path: Optional[str] = None):
         """Сохраняет шаблоны в YAML файл."""

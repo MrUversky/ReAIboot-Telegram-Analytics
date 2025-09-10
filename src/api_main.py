@@ -12,6 +12,9 @@ from datetime import datetime, timedelta
 import asyncio
 import logging
 
+# Настройка логирования
+logger = logging.getLogger(__name__)
+
 # Импорты из нашего проекта
 from .app.llm.orchestrator import LLMOrchestrator
 from .app.prompts import prompt_manager
@@ -435,6 +438,183 @@ async def reset_telegram_auth():
 
 # LLM эндпоинты
 
+@app.post("/api/llm/analyze-quick", tags=["llm"])
+async def quick_analyze_post(post_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Быстрый анализ одного поста (ТОЛЬКО фильтрация, оценка 1-10).
+    Возвращает только результат фильтрации без анализа и выбора рубрик.
+
+    - **post_data**: Данные поста для анализа
+    """
+    try:
+        logger.info(f"Начинаем быстрый анализ поста {post_data.get('message_id', 'unknown')}")
+
+        # Быстрый анализ: только фильтрация (оценка 1-10)
+        result = await orchestrator.process_post_enhanced(
+            post_data=post_data,
+            skip_analysis=True,  # Пропускаем анализ
+            skip_rubric_selection=True  # Пропускаем выбор рубрик
+        )
+
+        # Сохраняем результаты в базу данных
+        if result.overall_success and supabase_manager:
+            logger.info(f"Сохраняем результат анализа для поста {result.post_id}, успех: {result.overall_success}")
+            await orchestrator._save_results_to_database([result], [post_data])
+            logger.info(f"Результат анализа сохранен для поста {result.post_id}")
+
+        return {
+            "success": result.overall_success,
+            "post_id": result.post_id,
+            "stages": [
+                {
+                    "stage": stage.stage_name,
+                    "success": stage.success,
+                    "data": stage.data,
+                    "error": stage.error,
+                    "tokens_used": stage.tokens_used,
+                    "processing_time": stage.processing_time
+                }
+                for stage in result.stages
+            ],
+            "total_tokens": result.total_tokens,
+            "total_time": result.total_time,
+            "error": result.error
+        }
+
+    except Exception as e:
+        logger.error(f"Ошибка при быстром анализе: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка анализа: {str(e)}")
+
+
+@app.post("/api/llm/generate-scenarios", tags=["llm"])
+async def generate_scenarios_from_analysis(request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Генерация сценариев на основе уже проведенного анализа.
+
+    - **post_data**: Данные поста
+    - **selected_combinations**: Выбранные комбинации рубрик/форматов
+    """
+    try:
+        post_data = request.get("post_data", {})
+        selected_combinations = request.get("selected_combinations", [])
+
+        if not post_data:
+            raise HTTPException(status_code=400, detail="Не переданы данные поста")
+
+        if not selected_combinations:
+            raise HTTPException(status_code=400, detail="Не выбраны комбинации рубрик/форматов")
+
+        logger.info(f"Генерация сценариев для поста {post_data.get('message_id', 'unknown')}")
+
+        scenarios = []
+
+        # Генерируем сценарии для выбранных комбинаций
+        for i, combination in enumerate(selected_combinations):
+            logger.info(f"Генерация сценария {i+1}/{len(selected_combinations)}")
+
+            generator_input = {
+                **post_data,
+                "rubric": combination.get("rubric", {}),
+                "reel_format": combination.get("format", {}),
+                "analysis": post_data.get("analysis", {})
+            }
+
+            scenario_result = await orchestrator.generator_processor.process(generator_input)
+
+            if scenario_result.success:
+                scenarios.append({
+                    **scenario_result.data,
+                    "rubric": combination.get("rubric", {}),
+                    "format": combination.get("format", {}),
+                    "combination_id": combination.get("id", f"combination_{i}"),
+                    "selection_score": combination.get("score", 0)
+                })
+
+        # Сохраняем сценарии в базу данных
+        if scenarios and supabase_manager:
+            # Здесь нужно будет добавить логику сохранения сценариев
+            pass
+
+        return {
+            "success": len(scenarios) > 0,
+            "scenarios_generated": len(scenarios),
+            "scenarios": scenarios
+        }
+
+    except Exception as e:
+        logger.error(f"Ошибка при генерации сценариев: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка генерации: {str(e)}")
+
+
+@app.post("/api/llm/process-enhanced", tags=["llm"])
+async def process_post_enhanced(request: ProcessRequest, background_tasks: BackgroundTasks):
+    """
+    Полная 4-этапная обработка поста через новый enhanced флоу.
+
+    - **posts**: Список постов для обработки
+    - **skip_filter**: Пропустить фильтрацию (default: false)
+    - **skip_analysis**: Пропустить анализ (default: false)
+    - **skip_rubric_selection**: Пропустить выбор рубрик (default: false)
+    """
+    try:
+        # Преобразуем Pydantic модели в словари
+        posts_data = [post.model_dump() for post in request.posts]
+
+        # Параметры для обработки
+        skip_filter = request.model_dump().get("skip_filter", False)
+        skip_analysis = request.model_dump().get("skip_analysis", False)
+        skip_rubric_selection = request.model_dump().get("skip_rubric_selection", False)
+
+        # Запускаем обработку в фоне
+        background_tasks.add_task(
+            process_posts_enhanced_background,
+            posts_data,
+            skip_filter,
+            skip_analysis,
+            skip_rubric_selection
+        )
+
+        return {
+            "message": "4-этапная обработка запущена в фоне",
+            "posts_count": len(posts_data),
+            "stages": ["filter", "analysis", "rubric_selection", "generation"]
+        }
+
+    except Exception as e:
+        logger.error(f"Ошибка при запуске enhanced обработки: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка обработки: {str(e)}")
+
+
+async def process_posts_enhanced_background(
+    posts_data: List[Dict],
+    skip_filter: bool = False,
+    skip_analysis: bool = False,
+    skip_rubric_selection: bool = False
+):
+    """Фоновая 4-этапная обработка постов."""
+    try:
+        logger.info(f"Начинаем enhanced обработку {len(posts_data)} постов")
+
+        results = []
+        for post_data in posts_data:
+            result = await orchestrator.process_post_enhanced(
+                post_data=post_data,
+                skip_filter=skip_filter,
+                skip_analysis=skip_analysis,
+                skip_rubric_selection=skip_rubric_selection
+            )
+            results.append(result)
+
+        logger.info(f"Enhanced обработка завершена: {len(results)} результатов")
+
+        # Сохраняем результаты в базу данных
+        if supabase_manager and results:
+            await orchestrator._save_results_to_database(results, posts_data)
+
+    except Exception as e:
+        logger.error(f"Ошибка в enhanced фоновой обработке: {e}")
+
+
 @app.post("/api/llm/process", tags=["llm"])
 async def process_posts(request: ProcessRequest, background_tasks: BackgroundTasks):
     """
@@ -545,12 +725,14 @@ async def test_prompt_db(prompt_id: int, variables: Dict[str, Any]):
             raise HTTPException(status_code=404, detail=f"Промпт с ID {prompt_id} не найден")
 
         prompt = result.data[0]
-        content = prompt['content']
+        system_prompt = prompt.get('system_prompt', prompt.get('content', ''))
+        user_prompt = prompt.get('user_prompt', '')
 
-        # Подставляем переменные в промпт
+        # Подставляем переменные в промпты
         for key, value in variables.items():
             placeholder = "{{" + key + "}}"
-            content = content.replace(placeholder, str(value))
+            system_prompt = system_prompt.replace(placeholder, str(value))
+            user_prompt = user_prompt.replace(placeholder, str(value))
 
         # Проверяем доступность API ключей
         api_key = None
@@ -563,7 +745,8 @@ async def test_prompt_db(prompt_id: int, variables: Dict[str, Any]):
             # Возвращаем только обработанный промпт без вызова LLM
             return {
                 "prompt_id": prompt_id,
-                "processed_content": content,
+                "processed_system_prompt": system_prompt,
+                "processed_user_prompt": user_prompt,
                 "variables_used": variables,
                 "model": prompt['model'],
                 "temperature": prompt['temperature'],
@@ -578,9 +761,18 @@ async def test_prompt_db(prompt_id: int, variables: Dict[str, Any]):
             # Вызываем соответствующий API
             if prompt['model'].startswith('gpt'):
                 client = AsyncOpenAI(api_key=api_key)
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                if user_prompt:
+                    messages.append({"role": "user", "content": user_prompt})
+                elif not system_prompt:
+                    # Fallback если нет ни system ни user
+                    messages.append({"role": "user", "content": "Пожалуйста, выполните задачу."})
+
                 response = await client.chat.completions.create(
                     model=prompt['model'],
-                    messages=[{"role": "user", "content": content}],
+                    messages=messages,
                     temperature=prompt['temperature'],
                     max_tokens=prompt['max_tokens']
                 )
@@ -589,11 +781,21 @@ async def test_prompt_db(prompt_id: int, variables: Dict[str, Any]):
             elif prompt['model'].startswith('claude'):
                 import anthropic
                 client = anthropic.AsyncAnthropic(api_key=api_key)
+                messages = []
+                if user_prompt:
+                    messages.append({"role": "user", "content": user_prompt})
+                elif system_prompt:
+                    # Для Claude system prompt передается отдельно
+                    pass
+                else:
+                    messages.append({"role": "user", "content": "Пожалуйста, выполните задачу."})
+
                 response = await client.messages.create(
                     model=prompt['model'],
                     max_tokens=prompt['max_tokens'],
                     temperature=prompt['temperature'],
-                    messages=[{"role": "user", "content": content}]
+                    system=system_prompt if system_prompt else None,
+                    messages=messages
                 )
                 llm_response = response.content[0].text
 
@@ -608,7 +810,8 @@ async def test_prompt_db(prompt_id: int, variables: Dict[str, Any]):
 
             return {
                 "prompt_id": prompt_id,
-                "processed_content": content,
+                "processed_system_prompt": system_prompt,
+                "processed_user_prompt": user_prompt,
                 "variables_used": variables,
                 "model": prompt['model'],
                 "temperature": prompt['temperature'],
@@ -621,7 +824,8 @@ async def test_prompt_db(prompt_id: int, variables: Dict[str, Any]):
         except Exception as api_error:
             return {
                 "prompt_id": prompt_id,
-                "processed_content": content,
+                "processed_system_prompt": system_prompt,
+                "processed_user_prompt": user_prompt,
                 "variables_used": variables,
                 "model": prompt['model'],
                 "temperature": prompt['temperature'],
@@ -771,16 +975,25 @@ async def create_prompt(prompt_data: Dict[str, Any]):
         user = supabase.auth.get_user()
         user_id = user.user.id if user.user else None
 
-        # Создаем промпт в базе данных
+        # Создаем промпт в базе данных с новой структурой
         prompt_record = {
             'name': prompt_data['name'],
             'description': prompt_data.get('description', ''),
             'prompt_type': prompt_data.get('prompt_type', 'custom'),
+            'category': prompt_data.get('category', 'general'),
             'content': prompt_data['content'],
-            'model': prompt_data.get('model', 'gpt-4o-mini'),
+            'variables': prompt_data.get('variables', {}),
+            'model': prompt_data.get('model', 'gpt-4o-mini'),  # Старые поля для совместимости
             'temperature': prompt_data.get('temperature', 0.7),
             'max_tokens': prompt_data.get('max_tokens', 2000),
+            'model_settings': prompt_data.get('model_settings', {
+                'model': prompt_data.get('model', 'gpt-4o-mini'),
+                'temperature': prompt_data.get('temperature', 0.7),
+                'max_tokens': prompt_data.get('max_tokens', 2000)
+            }),
             'is_active': prompt_data.get('is_active', True),
+            'is_system': prompt_data.get('is_system', False),
+            'version': prompt_data.get('version', 1),
             'created_by': user_id,
             'created_at': datetime.now().isoformat(),
             'updated_at': datetime.now().isoformat()
@@ -809,9 +1022,34 @@ async def update_prompt_db(prompt_id: int, prompt_data: Dict[str, Any]):
         }
 
         # Добавляем только переданные поля
-        for field in ['name', 'description', 'prompt_type', 'content', 'model', 'temperature', 'max_tokens', 'is_active']:
+        for field in ['name', 'description', 'prompt_type', 'category', 'content', 'variables', 'model_settings', 'is_active', 'version']:
             if field in prompt_data:
                 update_data[field] = prompt_data[field]
+
+        # Обновляем старые поля для совместимости
+        if 'model' in prompt_data:
+            update_data['model'] = prompt_data['model']
+        if 'temperature' in prompt_data:
+            update_data['temperature'] = prompt_data['temperature']
+        if 'max_tokens' in prompt_data:
+            update_data['max_tokens'] = prompt_data['max_tokens']
+
+        # Синхронизируем model_settings со старыми полями
+        if any(field in prompt_data for field in ['model', 'temperature', 'max_tokens']) and 'model_settings' not in prompt_data:
+            # Получаем текущие model_settings
+            current_result = supabase_manager.client.table('llm_prompts').select('model_settings').eq('id', prompt_id).execute()
+            if current_result.data:
+                current_settings = current_result.data[0]['model_settings'] or {}
+
+                # Обновляем только переданные поля
+                if 'model' in prompt_data:
+                    current_settings['model'] = prompt_data['model']
+                if 'temperature' in prompt_data:
+                    current_settings['temperature'] = prompt_data['temperature']
+                if 'max_tokens' in prompt_data:
+                    current_settings['max_tokens'] = prompt_data['max_tokens']
+
+                update_data['model_settings'] = current_settings
 
         result = supabase_manager.client.table('llm_prompts').update(update_data).eq('id', prompt_id).execute()
 
@@ -1069,8 +1307,33 @@ async def get_posts(limit: int = 100, offset: int = 0, channel_username: Optiona
         posts_result = query.order('date', desc=True).range(offset, offset + limit - 1).execute()
         posts = posts_result.data or []
 
-        # Добавляем метрики виральности к постам
+        # Получаем все post_id для batch запроса
+        post_ids = [post['id'] for post in posts]
+
+        # Batch запрос к post_analysis для всех постов
+        analysis_dict = {}
+        if post_ids:
+            try:
+                analysis_result = supabase_manager.client.table('post_analysis').select('post_id, suitability_score, is_suitable, filter_reason').in_('post_id', post_ids).execute()
+                if analysis_result.data:
+                    # Группируем по post_id и выбираем лучшую оценку
+                    for analysis in analysis_result.data:
+                        post_id = analysis['post_id']
+                        score = analysis['suitability_score']
+
+                        # Если это первая запись для поста или оценка лучше предыдущей
+                        if post_id not in analysis_dict or (score is not None and (analysis_dict[post_id]['score'] is None or score > analysis_dict[post_id]['score'])):
+                            analysis_dict[post_id] = {
+                                'score': score,
+                                'is_suitable': analysis['is_suitable'],
+                                'analysis_reason': analysis['filter_reason']
+                            }
+            except Exception as e:
+                logger.warning(f"Не удалось получить анализ постов: {e}")
+
+        # Добавляем метрики виральности и оценки к постам
         for post in posts:
+            # Метрики виральности
             if 'viral_score' not in post or post['viral_score'] is None:
                 post['viral_score'] = 0
             if 'engagement_rate' not in post or post['engagement_rate'] is None:
@@ -1080,9 +1343,65 @@ async def get_posts(limit: int = 100, offset: int = 0, channel_username: Optiona
             if 'median_multiplier' not in post or post['median_multiplier'] is None:
                 post['median_multiplier'] = 0
 
+            # Оценка из batch результата
+            if post['id'] in analysis_dict:
+                analysis = analysis_dict[post['id']]
+                post['score'] = analysis['score']
+                post['is_suitable'] = analysis['is_suitable']
+                post['analysis_reason'] = analysis['analysis_reason']
+            else:
+                post['score'] = None
+                post['is_suitable'] = None
+                post['analysis_reason'] = None
+
         return {"posts": posts, "count": len(posts)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка получения постов: {str(e)}")
+
+@app.get("/api/posts/{post_id}", tags=["posts"])
+async def get_single_post(post_id: str):
+    """Получить один пост с оценкой."""
+    try:
+        # Получаем пост
+        post_result = supabase_manager.client.table('posts').select('*').eq('id', post_id).execute()
+
+        if not post_result.data or len(post_result.data) == 0:
+            raise HTTPException(status_code=404, detail="Пост не найден")
+
+        post = post_result.data[0]
+
+        # Добавляем метрики виральности
+        if 'viral_score' not in post or post['viral_score'] is None:
+            post['viral_score'] = 0
+        if 'engagement_rate' not in post or post['engagement_rate'] is None:
+            post['engagement_rate'] = 0
+        if 'zscore' not in post or post['zscore'] is None:
+            post['zscore'] = 0
+        if 'median_multiplier' not in post or post['median_multiplier'] is None:
+            post['median_multiplier'] = 0
+
+        # Получаем оценку из post_analysis
+        try:
+            analysis_result = supabase_manager.client.table('post_analysis').select('suitability_score, is_suitable, filter_reason').eq('post_id', post_id).execute()
+            if analysis_result.data and len(analysis_result.data) > 0:
+                analysis = analysis_result.data[0]
+                post['score'] = analysis['suitability_score']
+                post['is_suitable'] = analysis['is_suitable']
+                post['analysis_reason'] = analysis['filter_reason']
+            else:
+                post['score'] = None
+                post['is_suitable'] = None
+                post['analysis_reason'] = None
+        except Exception:
+            post['score'] = None
+            post['is_suitable'] = None
+            post['analysis_reason'] = None
+
+        return post
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения поста: {str(e)}")
 
 @app.get("/api/posts/viral", tags=["posts"])
 async def get_viral_posts(channel_username: Optional[str] = None,

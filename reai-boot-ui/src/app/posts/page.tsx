@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSupabase } from '@/components/SupabaseProvider'
 import { PostCard } from '@/components/PostCard'
+import { PostAnalysisModal } from '@/components/PostAnalysisModal'
+import toast from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -42,6 +44,9 @@ export default function PostsPage() {
   const [dateRange, setDateRange] = useState<'7d' | '30d' | 'all'>('7d')
   const [minViews, setMinViews] = useState<number>(0)
   const [minEngagement, setMinEngagement] = useState<number>(0)
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false)
+  const [analyzingPost, setAnalyzingPost] = useState<Post | null>(null)
+  const [analyzingPosts, setAnalyzingPosts] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!loading && !user) {
@@ -61,6 +66,24 @@ export default function PostsPage() {
       loadPosts()
     }
   }, [user, dateRange, minViews, minEngagement])
+
+  const updateSinglePost = async (postId: string) => {
+    try {
+      // Получаем обновленные данные только для этого поста
+      const updatedPost = await apiClient.getPost(postId)
+
+      // Обновляем пост в состоянии
+      setPosts(prevPosts =>
+        prevPosts.map(post =>
+          post.id === postId ? updatedPost : post
+        )
+      )
+    } catch (error) {
+      console.error('Error updating single post:', error)
+      // В случае ошибки перезагружаем все посты
+      loadPosts()
+    }
+  }
 
   const loadPosts = async () => {
     try {
@@ -111,14 +134,63 @@ export default function PostsPage() {
     }
   }
 
-  const handleAnalyzePost = async (post: Post) => {
+  const handleQuickAnalyzePost = async (post: Post) => {
+    // Добавляем пост в состояние загрузки
+    setAnalyzingPosts(prev => new Set(prev).add(post.id))
+
     try {
-      await apiClient.analyzePosts([post])
-      alert('Анализ запущен! Результаты появятся в разделе Сценарии.')
+      // Быстрый анализ: только фильтрация (1-10) без генерации сценариев
+      const result = await apiClient.quickAnalyzePost({
+        message_id: post.message_id,
+        channel_username: post.channel_username,
+        channel_title: post.channel_title,
+        text: post.full_text,
+        views: post.views,
+        reactions: post.reactions,
+        replies: post.replies,
+        forwards: post.forwards
+      })
+
+      // Ищем оценку в stages
+      const filterStage = result.stages?.find((stage: any) => stage.stage === 'filter')
+      const score = filterStage?.data?.score || filterStage?.data?.rating
+
+      if (filterStage?.success && score) {
+        toast.success(`Оценка получена: ${score}/10 ⭐`, {
+          duration: 3000,
+        })
+      } else {
+        toast.error(`Ошибка анализа: ${filterStage?.error || 'Не удалось получить оценку'}`, {
+          duration: 4000,
+        })
+      }
+
+      // Обновляем только этот пост вместо всех постов
+      await updateSinglePost(post.id)
     } catch (error) {
-      console.error('Error analyzing post:', error)
-      alert('Ошибка при запуске анализа')
+      console.error('Error in quick analysis:', error)
+      toast.error('Ошибка при быстром анализе', {
+        duration: 4000,
+      })
+    } finally {
+      // Убираем пост из состояния загрузки
+      setAnalyzingPosts(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(post.id)
+        return newSet
+      })
     }
+  }
+
+  const handleAnalyzePost = async (post: Post) => {
+    // Полный анализ: открываем модальное окно для 4-этапного анализа
+    setAnalyzingPost(post)
+    setShowAnalysisModal(true)
+  }
+
+  const handleAnalysisComplete = (result: any) => {
+    // Обновляем список постов для отображения результатов анализа
+    loadPosts()
   }
 
   const filteredAndSortedPosts = posts
@@ -445,8 +517,11 @@ export default function PostsPage() {
             <PostCard
               key={post.id}
               post={post}
+              onQuickAnalyze={handleQuickAnalyzePost}
               onAnalyze={handleAnalyzePost}
+              showQuickAnalysis={true}
               showAnalysis={true}
+              isAnalyzing={analyzingPosts.has(post.id)}
             />
           ))
         ) : (
@@ -459,6 +534,18 @@ export default function PostsPage() {
           </div>
         )}
       </div>
+
+      {/* Модальное окно анализа */}
+      {showAnalysisModal && analyzingPost && (
+        <PostAnalysisModal
+          post={analyzingPost}
+          onClose={() => {
+            setShowAnalysisModal(false)
+            setAnalyzingPost(null)
+          }}
+          onAnalysisComplete={handleAnalysisComplete}
+        />
+      )}
     </div>
   )
 }

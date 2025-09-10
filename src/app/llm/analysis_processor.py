@@ -72,45 +72,21 @@ class AnalysisProcessor(BaseLLMProcessor):
                     processing_time=time.time() - start_time
                 )
 
-            # Формируем промпт для анализа
-            system_prompt = """Ты - опытный аналитик контента для социальных сетей.
-Твоя задача: глубоко проанализировать почему пост стал популярным и какие уроки можно извлечь.
+            # Получаем system и user промпты из базы данных
+            from ..prompts import prompt_manager
+            system_prompt = prompt_manager.get_system_prompt("analyze_success_system", {
+                "score": score
+            })
 
-Проанализируй:
-1. Содержательные факторы (тема, качество текста, полезность)
-2. Презентационные факторы (структура, язык, формат)
-3. Психологические факторы (эмоциональный отклик, актуальность)
-4. Технические факторы (время публикации, оформление)
-
-Верни детальный анализ в формате JSON."""
-
-            user_prompt = f"""Проанализируй этот успешный пост (score: {score}/10):
-
-КАНАЛ: {channel_title}
-ПОСТ:
-{post_text[:3000]}
-
-МЕТРИКИ ВОВЛЕЧЕННОСТИ:
-- Просмотры: {views:,}
-- Реакции: {reactions:,}
-- Комментарии: {replies:,}
-- Репосты: {forwards:,}
-
-ПРОАНАЛИЗИРУЙ:
-1. Почему этот пост стал популярным?
-2. Какие ключевые факторы успеха?
-3. Что можно взять для создания собственного контента?
-4. Какие уроки для будущих постов?
-
-Верни анализ в JSON формате:
-{{
-  "success_factors": ["фактор1", "фактор2", ...],
-  "content_strengths": ["сильная сторона1", "сильная сторона2", ...],
-  "audience_insights": ["инсайт1", "инсайт2", ...],
-  "content_ideas": ["идея1", "идея2", ...],
-  "lessons_learned": "выводы для нашего контента",
-  "recommended_topics": ["тема1", "тема2", ...]
-}}"""
+            user_prompt = prompt_manager.get_user_prompt("analyze_success_system", {
+                "post_text": post_text,
+                "views": views,
+                "likes": reactions,  # используем reactions как likes
+                "forwards": forwards,
+                "replies": replies,
+                "channel_title": channel_title,
+                "score": score
+            })
 
             # Выполняем запрос к Claude
             success, response, error = await self._make_request_with_retry(

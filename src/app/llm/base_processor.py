@@ -233,6 +233,42 @@ class BaseLLMProcessor(ABC):
                     "music_suggestion": {"type": "string"}
                 },
                 "required": ["title", "duration", "hook", "insight", "steps", "cta"]
+            },
+            "rubric_selection": {
+                "type": "object",
+                "properties": {
+                    "combinations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "rubric": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"}
+                                    },
+                                    "required": ["id", "name"]
+                                },
+                                "format": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"}
+                                    },
+                                    "required": ["id", "name"]
+                                },
+                                "score": {"type": "number", "minimum": 1, "maximum": 10},
+                                "reason": {"type": "string"},
+                                "content_ideas": {"type": "array", "items": {"type": "string"}},
+                                "expected_engagement": {"type": "number", "minimum": 0, "maximum": 1}
+                            },
+                            "required": ["rubric", "format", "score", "reason"]
+                        }
+                    },
+                    "recommendation": {"type": "string"}
+                },
+                "required": ["combinations"]
             }
         }
 

@@ -104,7 +104,11 @@ export default function AdminPage() {
     name: '',
     description: '',
     prompt_type: 'custom',
-    content: '',
+    category: 'general',
+    content: '', // Для обратной совместимости
+    system_prompt: '',
+    user_prompt: '',
+    variables: {},
     model: 'gpt-4o-mini',
     temperature: 0.7,
     max_tokens: 2000,
@@ -115,6 +119,29 @@ export default function AdminPage() {
   const [promptTestResult, setPromptTestResult] = useState<any>(null)
   const [showPromptTest, setShowPromptTest] = useState(false)
   const [selectedTestPromptId, setSelectedTestPromptId] = useState<string>("")
+
+  // Подсказки для переменных по типам промптов
+  const variableHints = {
+    "post_text": "Текст поста для анализа",
+    "views": "Количество просмотров поста",
+    "reactions": "Количество реакций на пост",
+    "replies": "Количество комментариев",
+    "forwards": "Количество репостов",
+    "channel_title": "Название канала",
+    "score": "Оценка поста по шкале 1-10",
+    "project_context": "Контекст проекта ПерепрошИИвка",
+    "analysis": "Результат анализа поста",
+    "rubric_name": "Название выбранной рубрики",
+    "format_name": "Название выбранного формата",
+    "duration": "Продолжительность видео в секундах",
+    "available_rubrics": "Список доступных рубрик (JSON)",
+    "available_formats": "Список доступных форматов (JSON)",
+    "current_rubrics": "Текущие рубрики проекта",
+    "current_formats": "Текущие форматы проекта",
+    "engagement_rate": "Показатель вовлеченности",
+    "selected_rubric": "Выбранная рубрика (объект)",
+    "selected_format": "Выбранный формат (объект)"
+  }
 
   // Telegram Auth functions
   const checkTelegramStatus = async () => {
@@ -366,19 +393,18 @@ export default function AdminPage() {
       const [rubricsResult, formatsResult, dbPromptsResult, filePromptsResult] = await Promise.all([
         supabase.from('rubrics').select('*').order('name'),
         supabase.from('reel_formats').select('*').order('name'),
-        supabase.from('llm_prompts').select('*').order('created_at', { ascending: false }),
+        apiClient.getAllPromptsDB(),
         apiClient.getPrompts()
       ])
 
       if (rubricsResult.error) throw rubricsResult.error
       if (formatsResult.error) throw formatsResult.error
-
       console.log("Rubrics loaded:", rubricsResult.data || [])
       setRubrics(rubricsResult.data || [])
       console.log("Formats loaded:", formatsResult.data || [])
       setFormats(formatsResult.data || [])
-      console.log("DbPrompts loaded:", dbPromptsResult.error ? [] : (dbPromptsResult.data || []))
-      setDbPrompts(dbPromptsResult.error ? [] : (dbPromptsResult.data || []))
+      console.log("DbPrompts loaded:", dbPromptsResult || [])
+      setDbPrompts(dbPromptsResult || [])
       setFilePrompts(filePromptsResult || {})
     } catch (error) {
       console.error('Error loading LLM settings:', error)
@@ -605,18 +631,38 @@ export default function AdminPage() {
 
   const savePrompt = async () => {
     try {
-      if (!promptForm.name || !promptForm.content) {
-        alert('Название и содержимое промпта обязательны')
+      if (!promptForm.name) {
+        alert('Название промпта обязательно')
         return
+      }
+
+      if (!promptForm.system_prompt && !promptForm.user_prompt) {
+        alert('Должен быть заполнен хотя бы один промпт (System или User)')
+        return
+      }
+
+      // Готовим данные для отправки
+      const promptData = {
+        name: promptForm.name,
+        description: promptForm.description,
+        prompt_type: promptForm.prompt_type,
+        category: promptForm.category || 'general',
+        system_prompt: promptForm.system_prompt || '',
+        user_prompt: promptForm.user_prompt || '',
+        variables: promptForm.variables || {},
+        model: promptForm.model,
+        temperature: promptForm.temperature,
+        max_tokens: promptForm.max_tokens,
+        is_active: promptForm.is_active
       }
 
       if (promptForm.id) {
         // Обновление существующего промпта
-        await apiClient.updatePromptDB(parseInt(promptForm.id), promptForm)
+        await apiClient.updatePromptDB(parseInt(promptForm.id), promptData)
         alert('Промпт обновлен успешно')
       } else {
         // Создание нового промпта
-        await apiClient.createPromptDB(promptForm)
+        await apiClient.createPromptDB(promptData)
         alert('Промпт создан успешно')
       }
 
@@ -647,7 +693,11 @@ export default function AdminPage() {
       name: '',
       description: '',
       prompt_type: 'custom',
-      content: '',
+      category: 'general',
+      content: '', // Для обратной совместимости
+      system_prompt: '',
+      user_prompt: '',
+      variables: {},
       model: 'gpt-4o-mini',
       temperature: 0.7,
       max_tokens: 2000,
@@ -657,15 +707,25 @@ export default function AdminPage() {
   }
 
   const editPrompt = (prompt: any) => {
+    // Поддержка как старой, так и новой структуры данных
+    const modelSettings = prompt.model_settings || {}
+    const model = prompt.model || modelSettings.model || 'gpt-4o-mini'
+    const temperature = prompt.temperature || modelSettings.temperature || 0.7
+    const maxTokens = prompt.max_tokens || modelSettings.max_tokens || 2000
+
     setPromptForm({
       id: prompt.id.toString(),
       name: prompt.name,
       description: prompt.description || '',
       prompt_type: prompt.prompt_type,
-      content: prompt.content,
-      model: prompt.model,
-      temperature: prompt.temperature,
-      max_tokens: prompt.max_tokens,
+      category: prompt.category || 'general',
+      content: (prompt.system_prompt && prompt.system_prompt !== null) ? prompt.system_prompt : (prompt.content || ''),
+      system_prompt: (prompt.system_prompt && prompt.system_prompt !== null) ? prompt.system_prompt : '',
+      user_prompt: (prompt.user_prompt && prompt.user_prompt !== null) ? prompt.user_prompt : '',
+      variables: prompt.variables || {},
+      model: model,
+      temperature: temperature,
+      max_tokens: maxTokens,
       is_active: prompt.is_active
     })
     setShowLLMModal(true)
@@ -1802,16 +1862,27 @@ export default function AdminPage() {
                           <div className="mt-3">
                             <p className="text-sm text-gray-600 mb-1">Содержимое:</p>
                             <div className="bg-gray-50 p-3 rounded text-sm max-h-32 overflow-y-auto">
-                              {prompt.content.length > 200 ?
-                                `${prompt.content.substring(0, 200)}...` :
-                                prompt.content
-                              }
+                              {(() => {
+                                const systemText = prompt.system_prompt || ''
+                                const userText = prompt.user_prompt || ''
+                                const combinedText = systemText + (systemText && userText ? '\n\n--- User ---\n\n' : '') + userText
+
+                                return combinedText.length > 200 ?
+                                  `${combinedText.substring(0, 200)}...` :
+                                  combinedText || 'Промпт не настроен'
+                              })()}
                             </div>
-                            {extractVariablesFromPrompt(prompt.content).length > 0 && (
-                              <div className="mt-2">
-                                <p className="text-xs text-gray-500">Переменные: {extractVariablesFromPrompt(prompt.content).join(', ')}</p>
-                              </div>
-                            )}
+                            {(() => {
+                              const systemVars = extractVariablesFromPrompt(prompt.system_prompt || '')
+                              const userVars = extractVariablesFromPrompt(prompt.user_prompt || '')
+                              const allVars = [...new Set([...systemVars, ...userVars])]
+
+                              return allVars.length > 0 && (
+                                <div className="mt-2">
+                                  <p className="text-xs text-gray-500">Переменные: {allVars.join(', ')}</p>
+                                </div>
+                              )
+                            })()}
                           </div>
                         </CardContent>
                       </Card>
@@ -1849,7 +1920,9 @@ export default function AdminPage() {
                             <SelectContent>
                               <SelectItem value="filter">Фильтр постов</SelectItem>
                               <SelectItem value="analysis">Анализ поста</SelectItem>
+                              <SelectItem value="rubric_selection">Выбор рубрик</SelectItem>
                               <SelectItem value="generation">Генерация сценария</SelectItem>
+                              <SelectItem value="project_context">Контекст проекта</SelectItem>
                               <SelectItem value="custom">Пользовательский</SelectItem>
                             </SelectContent>
                           </Select>
@@ -1910,20 +1983,68 @@ export default function AdminPage() {
                       </div>
 
                       <div>
-                        <Label htmlFor="prompt_content">Содержимое промпта</Label>
+                        <Label htmlFor="prompt_system">System Prompt (инструкции для AI)</Label>
                         <Textarea
-                          id="prompt_content"
-                          value={promptForm.content}
-                          onChange={(e) => setPromptForm({...promptForm, content: e.target.value})}
-                          placeholder="Введите текст промпта. Используйте {{variable}} для подстановки переменных."
-                          rows={10}
+                          id="prompt_system"
+                          value={promptForm.system_prompt}
+                          onChange={(e) => setPromptForm({...promptForm, system_prompt: e.target.value})}
+                          placeholder="Роль и инструкции для AI. Например: 'Ты эксперт по анализу контента...'"
+                          rows={6}
                         />
-                        {extractVariablesFromPrompt(promptForm.content).length > 0 && (
-                          <div className="mt-2 p-2 bg-blue-50 rounded text-sm">
-                            <p className="text-blue-800 font-medium">Найденные переменные:</p>
-                            <p className="text-blue-600">{extractVariablesFromPrompt(promptForm.content).join(', ')}</p>
-                          </div>
-                        )}
+                      </div>
+
+                      <div>
+                        <Label htmlFor="prompt_user">User Prompt (данные для обработки)</Label>
+                        <Textarea
+                          id="prompt_user"
+                          value={promptForm.user_prompt}
+                          onChange={(e) => setPromptForm({...promptForm, user_prompt: e.target.value})}
+                          placeholder="Данные и контекст для обработки. Используйте {{variable}} для подстановки переменных."
+                          rows={6}
+                        />
+                        {(() => {
+                          const systemVars = extractVariablesFromPrompt(promptForm.system_prompt || '')
+                          const userVars = extractVariablesFromPrompt(promptForm.user_prompt || '')
+                          const allVars = [...new Set([...systemVars, ...userVars])]
+
+                          return allVars.length > 0 && (
+                            <div className="mt-2 p-3 bg-blue-50 rounded text-sm">
+                              <p className="text-blue-800 font-medium mb-2">Найденные переменные:</p>
+                              <div className="space-y-1">
+                                {allVars.map((variable) => {
+                                  const inSystem = systemVars.includes(variable)
+                                  const inUser = userVars.includes(variable)
+                                  return (
+                                    <div key={variable} className="flex items-center space-x-2">
+                                      <code className="bg-blue-100 px-2 py-1 rounded text-xs font-mono">
+                                        {`{{${variable}}}`}
+                                      </code>
+                                      <div className="flex items-center space-x-2 text-xs">
+                                        <span className="text-blue-600">
+                                          {variableHints[variable as keyof typeof variableHints] || 'Описание отсутствует'}
+                                        </span>
+                                        <div className="flex space-x-1">
+                                          {inSystem && (
+                                            <span className="bg-green-100 text-green-700 px-1 rounded">System</span>
+                                          )}
+                                          {inUser && (
+                                            <span className="bg-blue-100 text-blue-700 px-1 rounded">User</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                              <div className="mt-3 pt-2 border-t border-blue-200">
+                                <p className="text-blue-700 font-medium text-xs mb-1">Подсказки по переменным:</p>
+                                <p className="text-blue-600 text-xs">
+                                  Используйте двойные фигурные скобки для переменных: {'{{variable_name}}'}
+                                </p>
+                              </div>
+                            </div>
+                          )
+                        })()}
                       </div>
 
                       <div className="flex items-center space-x-2">
@@ -2033,7 +2154,16 @@ export default function AdminPage() {
                               <div>
                                 <strong>Обработанный промпт:</strong>
                                 <div className="mt-1 p-2 bg-white rounded text-xs max-h-40 overflow-y-auto">
-                                  {promptTestResult.processed_content}
+                                  <div>
+                                    <strong>System:</strong>
+                                    <div className="bg-blue-50 p-2 rounded mt-1 mb-2 text-sm">
+                                      {promptTestResult.processed_system_prompt || 'Не задан'}
+                                    </div>
+                                    <strong>User:</strong>
+                                    <div className="bg-green-50 p-2 rounded mt-1 text-sm">
+                                      {promptTestResult.processed_user_prompt || 'Не задан'}
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
                               {promptTestResult.llm_response && (

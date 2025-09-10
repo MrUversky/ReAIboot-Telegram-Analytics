@@ -13,7 +13,8 @@ import {
   LogOut,
   Database,
   Bot,
-  TrendingUp
+  TrendingUp,
+  Book
 } from 'lucide-react'
 
 const navigation = [
@@ -21,6 +22,7 @@ const navigation = [
   { name: 'Посты', href: '/posts', icon: FileText },
   { name: 'Сценарии', href: '/scenarios', icon: Video },
   { name: 'Парсинг', href: '/parsing', icon: Database },
+  { name: 'Wiki', href: '/wiki', icon: Book },
   { name: 'Статистика', href: '/stats', icon: TrendingUp },
   { name: 'Админ', href: '/admin', icon: Settings },
 ]
@@ -30,7 +32,10 @@ export function Navigation() {
   const { user, permissions, signOut, loading } = useSupabase()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
-  if (loading) {
+  // Wiki доступна без авторизации
+  const isWikiRoute = pathname?.startsWith('/wiki')
+
+  if (loading && !isWikiRoute) {
     return (
       <nav className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -44,7 +49,7 @@ export function Navigation() {
     )
   }
 
-  if (!user) {
+  if (!user && !isWikiRoute) {
     return (
       <nav className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -68,9 +73,19 @@ export function Navigation() {
 
   // Фильтруем навигацию в зависимости от прав
   const filteredNavigation = navigation.filter(item => {
+    // Wiki доступна всегда
+    if (item.href === '/wiki') {
+      return true
+    }
+
+    if (!user) {
+      // Для неавторизованных пользователей только wiki и дашборд
+      return item.href === '/' || item.href === '/wiki'
+    }
+
     if (!permissions?.hasAccess) {
-      // В демо режиме только дашборд
-      return item.href === '/'
+      // В демо режиме только дашборд и wiki
+      return item.href === '/' || item.href === '/wiki'
     }
     if (item.href === '/admin' && !permissions.canAdmin) {
       return false
@@ -122,14 +137,14 @@ export function Navigation() {
               >
                 <User className="w-4 h-4" />
                 <span className="hidden sm:block">
-                  {user.email?.split('@')[0]}
+                  {user?.email?.split('@')[0]}
                 </span>
               </button>
 
               {isMenuOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-10">
                   <div className="px-4 py-2 text-sm text-gray-700 border-b">
-                    {user.email}
+                    {user?.email}
                   </div>
                   <button
                     onClick={signOut}

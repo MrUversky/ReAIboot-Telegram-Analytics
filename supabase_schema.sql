@@ -147,6 +147,24 @@ CREATE TABLE public.rubric_formats (
     PRIMARY KEY (rubric_id, format_id)
 );
 
+-- LLM Prompts management
+CREATE TABLE public.llm_prompts (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    prompt_type TEXT NOT NULL DEFAULT 'system', -- 'system', 'user', 'filter', 'analysis', 'generation'
+    category TEXT DEFAULT 'general', -- 'project_context', 'filtering', 'analysis', 'generation'
+    content TEXT NOT NULL,
+    variables JSONB DEFAULT '{}', -- Available variables for template substitution
+    model_settings JSONB DEFAULT '{}', -- Model-specific settings
+    is_active BOOLEAN DEFAULT true,
+    is_system BOOLEAN DEFAULT false, -- System prompts that can't be deleted
+    version INTEGER DEFAULT 1,
+    created_by UUID REFERENCES public.profiles(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
 -- Post analysis results
 CREATE TABLE public.post_analysis (
     id SERIAL PRIMARY KEY,
@@ -260,6 +278,11 @@ CREATE INDEX idx_post_metrics_score ON public.post_metrics(overall_score DESC);
 CREATE INDEX idx_post_analysis_status ON public.post_analysis(status);
 CREATE INDEX idx_post_analysis_post ON public.post_analysis(post_id);
 CREATE INDEX idx_scenarios_status ON public.scenarios(status);
+CREATE INDEX idx_llm_prompts_type ON public.llm_prompts(prompt_type);
+CREATE INDEX idx_llm_prompts_category ON public.llm_prompts(category);
+CREATE INDEX idx_llm_prompts_active ON public.llm_prompts(is_active);
+CREATE INDEX idx_llm_prompts_system ON public.llm_prompts(is_system);
+CREATE INDEX idx_llm_prompts_name ON public.llm_prompts(name);
 CREATE INDEX idx_system_logs_level ON public.system_logs(level);
 CREATE INDEX idx_system_logs_created ON public.system_logs(created_at DESC);
 CREATE INDEX idx_token_usage_user ON public.token_usage(user_id);
@@ -277,6 +300,7 @@ ALTER TABLE public.post_metrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.rubrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reel_formats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.rubric_formats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.llm_prompts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.post_analysis ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.scenarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.system_logs ENABLE ROW LEVEL SECURITY;
@@ -427,6 +451,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- LLM Prompts policies (authenticated users can read, only admins can modify)
+CREATE POLICY "Authenticated users can view LLM prompts" ON public.llm_prompts
+    FOR SELECT TO authenticated USING (true);
+
+CREATE POLICY "Only admins can modify LLM prompts" ON public.llm_prompts
+    FOR ALL TO authenticated USING (
+        EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE id = auth.uid() AND role = 'admin'
+        )
+    );
+
+-- Allow service role to manage system prompts
+CREATE POLICY "Service role can manage LLM prompts" ON public.llm_prompts
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
 -- Apply triggers to relevant tables
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON public.profiles
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -441,6 +481,9 @@ CREATE TRIGGER update_rubrics_updated_at BEFORE UPDATE ON public.rubrics
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_reel_formats_updated_at BEFORE UPDATE ON public.reel_formats
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_llm_prompts_updated_at BEFORE UPDATE ON public.llm_prompts
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_post_analysis_updated_at BEFORE UPDATE ON public.post_analysis
@@ -516,6 +559,75 @@ INSERT INTO public.system_settings (key, value, description, category) VALUES
   "require_human_review": true
 }', 'Пороги качества для автоматического одобрения сценариев', 'quality_control')
 ON CONFLICT (key) DO NOTHING;
+
+-- Initialize default LLM prompts
+INSERT INTO public.llm_prompts (name, description, prompt_type, category, content, variables, model_settings, is_system) VALUES
+('project_context_system', 'Системный промпт с контекстом проекта ПерепрошИИвка', 'system', 'project_context',
+'Ты - эксперт по анализу контента для социальных сетей.
+Проект: ПерепрошИИвка
+ПерепрошИИвка - образовательный проект о технологиях, бизнесе и саморазвитии.
+Создаем короткие видео-ролики (Reels) с практическими советами и инсайтами.
+
+Целевая аудитория:
+- Специалисты IT сферы
+- Предприниматели и бизнесмены
+- Люди, интересующиеся технологиями и саморазвитием
+
+Формат контента:
+- Короткие видео 15-60 секунд
+- Практическая ценность
+- Доступный язык
+- Визуально привлекательный контент
+
+Принципы контента:
+- Фокус на практической пользе
+- Простой и понятный язык
+- Визуально привлекательные материалы
+- Эмоциональная вовлеченность зрителя
+- Конкретные actionable советы
+
+Брендовый стиль:
+- Профессиональный, но дружелюбный
+- Доступный, без сложного жаргона
+- Вдохновляющий и мотивирующий
+- Фокус на результатах и пользе',
+'{}', '{}', true),
+
+('filter_posts_system', 'Системный промпт для фильтрации постов', 'system', 'filtering',
+'Ты - эксперт по анализу контента для социальных сетей.
+Проект: ПерепрошИИвка
+ПерепрошИИвка - образовательный проект о технологиях, бизнесе и саморазвитии.
+Создаем короткие видео-ролики (Reels) с практическими советами и инсайтами.
+
+Твоя задача: оценить, подходит ли пост из Telegram для создания образовательного контента.',
+'{"post_text": "", "views": 0, "reactions": 0, "replies": 0, "forwards": 0}',
+'{"model": "gpt-4o-mini", "temperature": 0.3, "max_tokens": 300}', true),
+
+('analyze_success_system', 'Системный промпт для анализа успешных постов', 'system', 'analysis',
+'Ты - опытный аналитик контента для социальных сетей.
+Проект: ПерепрошИИвка
+ПерепрошИИвка - образовательный проект о технологиях, бизнесе и саморазвитии.
+Создаем короткие видео-ролики (Reels) с практическими советами и инсайтами.
+
+Твоя задача: глубоко проанализировать почему пост стал популярным.',
+'{"post_text": "", "views": 0, "reactions": 0, "replies": 0, "forwards": 0, "analysis": ""}',
+'{"model": "claude-3-5-sonnet-20241022", "temperature": 0.4, "max_tokens": 2000}', true),
+
+('generate_scenario_system', 'Системный промпт для генерации сценариев', 'system', 'generation',
+'Ты - креативный директор по контенту для TikTok/Reels.
+Проект: ПерепрошИИвка
+ПерепрошИИвка - образовательный проект о технологиях, бизнесе и саморазвитии.
+Создаем короткие видео-ролики (Reels) с практическими советами и инсайтами.
+
+Профессиональный, но дружелюбный
+Доступный, без сложного жаргона
+Вдохновляющий и мотивирующий
+Фокус на результатах и пользе
+
+Создай сценарий с хуком, основной идеей и раскадровкой.',
+'{"post_text": "", "analysis": "", "rubric_name": "", "format_name": "", "duration": 30}',
+'{"model": "gpt-4o", "temperature": 0.7, "max_tokens": 3000}', true)
+ON CONFLICT (name) DO NOTHING;
 
 -- ===============================================
 -- МИГРАЦИЯ: Обновление существующих настроек

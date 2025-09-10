@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from .filter_processor import FilterProcessor
 from .analysis_processor import AnalysisProcessor
 from .generator_processor import GeneratorProcessor
+from .rubric_selector_processor import RubricSelectorProcessor
 from ..settings import settings
 from ..utils import setup_logger
 from ..supabase_client import supabase_client
@@ -49,16 +50,317 @@ class LLMOrchestrator:
         """Инициализирует оркестратор."""
         self.filter_processor = FilterProcessor()
         self.analysis_processor = AnalysisProcessor()
+        self.rubric_selector = RubricSelectorProcessor()
         self.generator_processor = GeneratorProcessor()
 
         # Проверяем доступность процессоров
         self.available_processors = {
             "filter": self.filter_processor.is_processor_available(),
             "analysis": self.analysis_processor.is_processor_available(),
+            "rubric_selection": self.rubric_selector.is_processor_available(),
             "generator": self.generator_processor.is_processor_available()
         }
 
         logger.info(f"Доступность процессоров: {self.available_processors}")
+
+    async def process_post_enhanced(
+        self,
+        post_data: Dict[str, Any],
+        skip_filter: bool = False,
+        skip_analysis: bool = False,
+        skip_rubric_selection: bool = False
+    ) -> OrchestratorResult:
+        """
+        4-этапная обработка поста: фильтр → анализ → выбор рубрик → генерация.
+
+        Args:
+            post_data: Данные поста
+            skip_filter: Пропустить этап фильтрации
+            skip_analysis: Пропустить этап анализа
+            skip_rubric_selection: Пропустить этап выбора рубрик
+
+        Returns:
+            Результат полной обработки
+        """
+        post_id = f"{post_data.get('message_id', 'unknown')}_{post_data.get('channel_username', 'unknown')}"
+        start_time = asyncio.get_event_loop().time()
+        stages = []
+        total_tokens = 0
+
+        logger.info(f"Начинаем 4-этапную обработку поста {post_id}")
+
+        try:
+            # Этап 1: Фильтрация (если не пропускается)
+            filter_result = None
+            if not skip_filter:
+                logger.info(f"Этап 1: Фильтрация поста {post_id}")
+                filter_result = await self.filter_processor.process(post_data)
+                logger.info(f"Этап 1: Фильтрация поста {post_id}")
+                filter_result = await self.filter_processor.process(post_data)
+
+                stages.append(ProcessingStage(
+                    stage_name="filter",
+                    success=filter_result.success,
+                    data=filter_result.data,
+                    error=filter_result.error,
+                    tokens_used=filter_result.tokens_used,
+                    processing_time=filter_result.processing_time
+                ))
+
+                total_tokens += filter_result.tokens_used
+
+                # Если фильтрация не прошла или пост не подходит
+                if not filter_result.success or not filter_result.data.get("suitable", False):
+                    reason = filter_result.data.get("reason", "Не прошел фильтрацию") if filter_result.success else filter_result.error
+
+                    return OrchestratorResult(
+                        post_id=post_id,
+                        overall_success=False,
+                        stages=stages,
+                        total_tokens=total_tokens,
+                        total_time=asyncio.get_event_loop().time() - start_time,
+                        error=f"Пост не прошел фильтрацию: {reason}"
+                    )
+            else:
+                logger.info(f"Пропускаем фильтрацию для поста {post_id}")
+                stages.append(ProcessingStage(
+                    stage_name="filter",
+                    success=True,
+                    data={"suitable": True, "score": 1.0, "reason": "Пропущено"},
+                    tokens_used=0,
+                    processing_time=0.0
+                ))
+
+            # Этап 2: Анализ причин успеха (если не пропускается)
+            analysis_result = None
+            if not skip_analysis:
+                logger.info(f"Этап 2: Анализ поста {post_id}")
+                filter_score = filter_result.data.get("score", 0) if filter_result else 0
+                analysis_result = await self.analysis_processor.process({
+                    **post_data,
+                    "filter_score": filter_score
+                })
+
+                stages.append(ProcessingStage(
+                    stage_name="analysis",
+                    success=analysis_result.success,
+                    data=analysis_result.data,
+                    error=analysis_result.error,
+                    tokens_used=analysis_result.tokens_used,
+                    processing_time=analysis_result.processing_time
+                ))
+
+                total_tokens += analysis_result.tokens_used
+
+                # Если анализ не удался, продолжаем без него
+                if not analysis_result.success:
+                    logger.warning(f"Анализ поста {post_id} не удался: {analysis_result.error}")
+            else:
+                logger.info(f"Пропускаем анализ для поста {post_id}")
+                stages.append(ProcessingStage(
+                    stage_name="analysis",
+                    success=True,
+                    data={"skipped": True},
+                    tokens_used=0,
+                    processing_time=0.0
+                ))
+
+            # Этап 3: Выбор рубрик и форматов (если не пропускается)
+            rubric_result = None
+            if not skip_rubric_selection:
+                logger.info(f"Этап 3: Выбор рубрик/форматов для поста {post_id}")
+                analysis_data = analysis_result.data if analysis_result and analysis_result.success else {}
+
+                # Получаем доступные рубрики и форматы
+                available_rubrics = await self._get_available_rubrics()
+                available_formats = await self._get_available_formats()
+
+                rubric_selection_data = {
+                    **post_data,
+                    "analysis": analysis_data,
+                    "available_rubrics": available_rubrics,
+                    "available_formats": available_formats
+                }
+
+                rubric_result = await self.rubric_selector.process(rubric_selection_data)
+
+                stages.append(ProcessingStage(
+                    stage_name="rubric_selection",
+                    success=rubric_result.success,
+                    data=rubric_result.data,
+                    error=rubric_result.error,
+                    tokens_used=rubric_result.tokens_used,
+                    processing_time=rubric_result.processing_time
+                ))
+
+                total_tokens += rubric_result.tokens_used
+
+                # Если выбор рубрик не удался, используем дефолтные
+                if not rubric_result.success:
+                    logger.warning(f"Выбор рубрик для поста {post_id} не удался: {rubric_result.error}")
+            else:
+                logger.info(f"Пропускаем выбор рубрик для поста {post_id}")
+                stages.append(ProcessingStage(
+                    stage_name="rubric_selection",
+                    success=True,
+                    data={"skipped": True},
+                    tokens_used=0,
+                    processing_time=0.0
+                ))
+
+            # Этап 4: Генерация сценариев (если не пропускается)
+            if not skip_rubric_selection:
+                logger.info(f"Этап 4: Генерация сценариев для поста {post_id}")
+                scenarios = []
+                if rubric_result and rubric_result.success:
+                    combinations = rubric_result.data.get("combinations", [])[:2]  # Топ-2 комбинации
+
+                    for i, combination in enumerate(combinations):
+                        logger.info(f"Генерация сценария {i+1}/{len(combinations)} для поста {post_id}")
+
+                        generator_input = {
+                            **post_data,
+                            "analysis": analysis_result.data if analysis_result and analysis_result.success else {},
+                            "rubric": combination.get("rubric", {}),
+                            "reel_format": combination.get("format", {}),
+                            "combination_score": combination.get("score", 0)
+                        }
+
+                        scenario_result = await self.generator_processor.process(generator_input)
+
+                        if scenario_result.success:
+                            scenarios.append({
+                                **scenario_result.data,
+                                "rubric": combination.get("rubric", {}),
+                                "format": combination.get("format", {}),
+                                "selection_reason": combination.get("reason", ""),
+                                "expected_engagement": combination.get("expected_engagement", 0)
+                            })
+
+                        stages.append(ProcessingStage(
+                            stage_name=f"generation_{i+1}",
+                            success=scenario_result.success,
+                            data=scenario_result.data,
+                            error=scenario_result.error,
+                            tokens_used=scenario_result.tokens_used,
+                            processing_time=scenario_result.processing_time
+                        ))
+
+                        total_tokens += scenario_result.tokens_used
+                else:
+                    # Если нет выбранных комбинаций, генерируем с дефолтными параметрами
+                    logger.info(f"Генерация сценария с дефолтными параметрами для поста {post_id}")
+
+                    generator_input = {
+                        **post_data,
+                        "analysis": analysis_result.data if analysis_result and analysis_result.success else {},
+                        "rubric": {},
+                        "reel_format": {}
+                    }
+
+                    scenario_result = await self.generator_processor.process(generator_input)
+
+                    if scenario_result.success:
+                        scenarios.append(scenario_result.data)
+
+                    stages.append(ProcessingStage(
+                        stage_name="generation",
+                        success=scenario_result.success,
+                        data=scenario_result.data,
+                        error=scenario_result.error,
+                        tokens_used=scenario_result.tokens_used,
+                        processing_time=scenario_result.processing_time
+                    ))
+
+                    total_tokens += scenario_result.tokens_used
+            else:
+                logger.info(f"Пропускаем генерацию сценариев для поста {post_id}")
+                scenarios = []
+                stages.append(ProcessingStage(
+                    stage_name="generation",
+                    success=True,
+                    data={"skipped": True},
+                    tokens_used=0,
+                    processing_time=0.0
+                ))
+
+            # Формируем финальный результат
+            final_data = None
+            if scenarios:
+                final_data = {
+                    "filter": filter_result.data if filter_result else None,
+                    "analysis": analysis_result.data if analysis_result and analysis_result.success else None,
+                    "rubric_selection": rubric_result.data if rubric_result and rubric_result.success else None,
+                    "scenarios": scenarios,
+                    "processing_stats": {
+                        "total_tokens": total_tokens,
+                        "total_time": asyncio.get_event_loop().time() - start_time,
+                        "stages_completed": len([s for s in stages if s.success])
+                    }
+                }
+
+            # Определяем общий успех: если пропускаем генерацию, успех = успеху фильтрации
+            if skip_rubric_selection:
+                overall_success = filter_result.success if filter_result else False
+            else:
+                overall_success = len(scenarios) > 0
+
+            return OrchestratorResult(
+                post_id=post_id,
+                overall_success=overall_success,
+                stages=stages,
+                final_data=final_data,
+                total_tokens=total_tokens,
+                total_time=asyncio.get_event_loop().time() - start_time
+            )
+
+        except Exception as e:
+            logger.error(f"Критическая ошибка в enhanced оркестраторе для поста {post_id}: {e}", exc_info=True)
+
+            return OrchestratorResult(
+                post_id=post_id,
+                overall_success=False,
+                stages=stages,
+                total_tokens=total_tokens,
+                total_time=asyncio.get_event_loop().time() - start_time,
+                error=f"Критическая ошибка: {str(e)}"
+            )
+
+    async def _get_available_rubrics(self) -> List[Dict[str, Any]]:
+        """Получает доступные рубрики из базы данных."""
+        try:
+            if supabase_client.is_connected():
+                # Получаем рубрики из Supabase
+                result = supabase_client.client.table('rubrics').select('*').eq('is_active', True).execute()
+                return result.data or []
+            else:
+                # Заглушка для тестирования
+                return [
+                    {"id": "tech_basics", "name": "Основы технологий", "description": "Базовые концепции IT"},
+                    {"id": "business_strategy", "name": "Бизнес стратегия", "description": "Стратегическое планирование"},
+                    {"id": "personal_growth", "name": "Личное развитие", "description": "Саморазвитие и продуктивность"}
+                ]
+        except Exception as e:
+            logger.error(f"Ошибка при получении рубрик: {e}")
+            return []
+
+    async def _get_available_formats(self) -> List[Dict[str, Any]]:
+        """Получает доступные форматы из базы данных."""
+        try:
+            if supabase_client.is_connected():
+                # Получаем форматы из Supabase
+                result = supabase_client.client.table('reel_formats').select('*').eq('is_active', True).execute()
+                return result.data or []
+            else:
+                # Заглушка для тестирования
+                return [
+                    {"id": "quick_tip", "name": "Быстрый совет", "duration_seconds": 30, "description": "Короткий практический совет"},
+                    {"id": "deep_dive", "name": "Глубокий разбор", "duration_seconds": 60, "description": "Подробный анализ темы"},
+                    {"id": "case_study", "name": "Кейс-стади", "duration_seconds": 45, "description": "Анализ реального примера"}
+                ]
+        except Exception as e:
+            logger.error(f"Ошибка при получении форматов: {e}")
+            return []
 
     async def process_post(
         self,
@@ -79,7 +381,7 @@ class LLMOrchestrator:
         Returns:
             Результат полной обработки
         """
-        post_id = post_data.get("message_id", "unknown")
+        post_id = f"{post_data.get('message_id', 'unknown')}_{post_data.get('channel_username', 'unknown')}"
         start_time = asyncio.get_event_loop().time()
         stages = []
         total_tokens = 0
@@ -280,8 +582,6 @@ class LLMOrchestrator:
     async def _save_results_to_database(self, results: List[OrchestratorResult], original_posts: List[Dict[str, Any]]):
         """Сохраняет результаты обработки в базу данных."""
         try:
-            logger.info(f"Сохранение {len(results)} результатов в базу данных")
-
             # Создаем словарь для быстрого поиска оригинальных данных поста
             posts_dict = {f"{post['message_id']}_{post['channel_username']}": post for post in original_posts}
 

@@ -71,83 +71,19 @@ class GeneratorProcessor(BaseLLMProcessor):
                     processing_time=time.time() - start_time
                 )
 
-            # Формируем промпт для генерации сценария
-            system_prompt = f"""Ты - креативный директор по контенту для TikTok/Reels/YouTube Shorts.
-Твоя задача: создать детальный сценарий короткого видео на основе успешного поста.
+            # Получаем system и user промпты из базы данных
+            from ..prompts import prompt_manager
+            system_prompt = prompt_manager.get_system_prompt("generate_scenario_system", {
+                "duration": duration
+            })
 
-КОНТЕКСТ ПРОЕКТА "ПерепрошИИвка":
-- Образовательный контент о технологиях, бизнесе, саморазвитии
-- Формат: вертикальные видео 15-60 секунд
-- Стиль: профессиональный, но доступный
-- Цель: давать реальную пользу зрителям
-
-РУБРИКА: {rubric.get('name', 'Не указана')}
-ФОРМАТ: {reel_format.get('name', 'Не указан')}
-
-Создай сценарий с:
-1. Хук (цепляющее начало)
-2. Основная идея (ключевой инсайт)
-3. Структура видео (шаги/сцены)
-4. Текст для озвучки
-5. Визуальные элементы
-6. Призыв к действию
-
-Учитывай анализ успеха поста: {analysis.get('success_factors', [])}"""
-
-            user_prompt = f"""Создай сценарий Reels на основе этого поста:
-
-ПОСТ:
-{post_text[:2000]}
-
-АНАЛИЗ УСПЕХА:
-{analysis.get('lessons_learned', 'Анализ не доступен')}
-
-КЛЮЧЕВЫЕ ФАКТОРЫ УСПЕХА:
-{', '.join(analysis.get('success_factors', ['Не определены']))}
-
-СОЗДАЙ СЦЕНАРИЙ ДЛЯ:
-- Рубрика: {rubric.get('name', 'Общая')}
-- Формат: {reel_format.get('name', 'Общий')}
-- Длительность: {reel_format.get('duration_options', [30])[0]} секунд
-
-СТРУКТУРА СЦЕНАРИЯ:
-1. Hook (3-5 секунд)
-2. Problem/Insight (5-10 секунд)
-3. Solution/Steps (10-15 секунд)
-4. CTA (3-5 секунд)
-
-ВЕРНИ В ФОРМАТЕ JSON:
-{{
-  "title": "Название видео",
-  "duration": 30,
-  "hook": {{
-    "text": "Текст хука",
-    "visual": "Описание визуала",
-    "voiceover": "Текст для озвучки"
-  }},
-  "insight": {{
-    "text": "Ключевой инсайт",
-    "visual": "Визуальное оформление",
-    "voiceover": "Текст для озвучки"
-  }},
-  "steps": [
-    {{
-      "step": 1,
-      "title": "Название шага",
-      "description": "Описание",
-      "visual": "Визуальные элементы",
-      "voiceover": "Текст для озвучки",
-      "duration": 5
-    }}
-  ],
-  "cta": {{
-    "text": "Призыв к действию",
-    "visual": "Визуальное оформление",
-    "voiceover": "Текст для озвучки"
-  }},
-  "hashtags": ["#тег1", "#тег2"],
-  "music_suggestion": "Рекомендация музыки"
-}}"""
+            user_prompt = prompt_manager.get_user_prompt("generate_scenario_system", {
+                "post_text": post_text,
+                "post_analysis": str(analysis),  # передаем анализ как строку
+                "rubric_name": rubric.get('name', 'Не указана'),
+                "format_name": reel_format.get('name', 'Не указан'),
+                "duration": duration
+            })
 
             # Выполняем запрос
             success, response, error = await self._make_request_with_retry(
