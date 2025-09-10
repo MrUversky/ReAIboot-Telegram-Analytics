@@ -530,10 +530,8 @@ async def generate_scenarios_from_analysis(request: Dict[str, Any]) -> Dict[str,
                     "selection_score": combination.get("score", 0)
                 })
 
-        # Сохраняем сценарии в базу данных
-        if scenarios and supabase_manager:
-            # Здесь нужно будет добавить логику сохранения сценариев
-            pass
+        # Сценарии уже сохранены в generator_processor.process через orchestrator
+        # Не сохраняем повторно, чтобы избежать дублирования
 
         return {
             "success": len(scenarios) > 0,
@@ -1295,8 +1293,65 @@ async def recalculate_all_baselines():
 
 # Viral посты
 
+@app.get("/api/posts/stats", tags=["posts"])
+async def get_posts_stats(
+    channel_username: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    min_views: Optional[int] = None,
+    min_engagement: Optional[float] = None,
+    search_term: Optional[str] = None
+):
+    """Получить общую статистику по постам без загрузки самих постов"""
+    try:
+        query = supabase_manager.client.table('posts').select('views, reactions, forwards', count='exact')
+
+        if channel_username:
+            query = query.eq('channel_username', channel_username)
+
+        # Применяем дополнительные фильтры
+        if date_from:
+            query = query.gte('date', date_from)
+        if date_to:
+            query = query.lte('date', date_to)
+        if min_views:
+            query = query.gte('views', min_views)
+        if min_engagement:
+            query = query.gte('engagement_rate', min_engagement * 0.01)
+        if search_term:
+            query = query.or_(f"text.ilike.%{search_term}%,channel_title.ilike.%{search_term}%")
+
+        result = query.execute()
+
+        total_views = sum(post['views'] for post in result.data or [])
+        total_reactions = sum(post['reactions'] for post in result.data or [])
+        total_forwards = sum(post['forwards'] for post in result.data or [])
+        total_posts = result.count or 0
+
+        return {
+            "total_posts": total_posts,
+            "total_views": total_views,
+            "total_reactions": total_reactions,
+            "total_forwards": total_forwards
+        }
+    except Exception as e:
+        logger.error(f"Error getting posts stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting posts stats: {str(e)}")
+
+
 @app.get("/api/posts", tags=["posts"])
-async def get_posts(limit: int = 100, offset: int = 0, channel_username: Optional[str] = None):
+async def get_posts(
+    limit: int = 50,
+    offset: int = 0,
+    channel_username: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    min_views: Optional[int] = None,
+    min_engagement: Optional[float] = None,
+    search_term: Optional[str] = None,
+    only_viral: bool = False,
+    min_viral_score: float = 1.0
+):
     """Получить посты с метриками."""
     try:
         query = supabase_manager.client.table('posts').select('*')
@@ -1304,8 +1359,33 @@ async def get_posts(limit: int = 100, offset: int = 0, channel_username: Optiona
         if channel_username:
             query = query.eq('channel_username', channel_username)
 
+        # Применяем дополнительные фильтры
+        if date_from:
+            query = query.gte('date', date_from)
+        if date_to:
+            query = query.lte('date', date_to)
+        if min_views:
+            query = query.gte('views', min_views)
+        if min_engagement:
+            query = query.gte('engagement_rate', min_engagement * 0.01)  # Конвертируем проценты в десятичную дробь
+        if search_term:
+            # Поиск по тексту поста (full_text, text_preview) и названию канала
+            query = query.or_(f"full_text.ilike.%{search_term}%,text_preview.ilike.%{search_term}%,channel_title.ilike.%{search_term}%,channel_username.ilike.%{search_term}%")
+
+        # Фильтр виральных постов
+        if only_viral:
+            query = query.gte('viral_score', min_viral_score)
+
+        # Получаем общее количество записей для определения has_more
+        count_query = query
+        count_result = count_query.execute()
+        total_count = len(count_result.data) if count_result.data else 0
+
         posts_result = query.order('date', desc=True).range(offset, offset + limit - 1).execute()
         posts = posts_result.data or []
+
+        # Определяем, есть ли еще записи
+        has_more = (offset + len(posts)) < total_count
 
         # Получаем все post_id для batch запроса
         post_ids = [post['id'] for post in posts]
@@ -1354,7 +1434,11 @@ async def get_posts(limit: int = 100, offset: int = 0, channel_username: Optiona
                 post['is_suitable'] = None
                 post['analysis_reason'] = None
 
-        return {"posts": posts, "count": len(posts)}
+        return {
+            "posts": posts,
+            "count": total_count,
+            "has_more": has_more
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка получения постов: {str(e)}")
 

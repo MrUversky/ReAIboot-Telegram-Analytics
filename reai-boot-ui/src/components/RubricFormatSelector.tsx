@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Target, BarChart3, TrendingUp, Play, Clock } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import toast from 'react-hot-toast'
 
 interface RubricFormatCombination {
   rubric: {
@@ -34,17 +35,24 @@ export function RubricFormatSelector({ post, analysis, onGenerate, onClose }: Ru
   const [selectedCombinations, setSelectedCombinations] = useState<boolean[]>([])
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [combinationsLoaded, setCombinationsLoaded] = useState(false)
 
   useEffect(() => {
+    // Защита от повторной загрузки
+    if (combinationsLoaded) {
+      return
+    }
+
     // Если есть анализ с комбинациями, используем их
     if (analysis?.rubric_selection?.combinations) {
       setCombinations(analysis.rubric_selection.combinations)
       setSelectedCombinations(new Array(analysis.rubric_selection.combinations.length).fill(true))
+      setCombinationsLoaded(true)
     } else {
       // Иначе получаем комбинации из базы данных
       loadCombinations()
     }
-  }, [analysis])
+  }, [analysis, combinationsLoaded])
 
   const loadCombinations = async () => {
     setLoading(true)
@@ -55,38 +63,63 @@ export function RubricFormatSelector({ post, analysis, onGenerate, onClose }: Ru
         apiClient.getFormats()
       ])
 
-      // Создаем топ-3 комбинаций (упрощенная логика)
-      const sampleCombinations: RubricFormatCombination[] = [
-        {
-          rubric: { id: 'tech_basics', name: 'Основы технологий' },
-          format: { id: 'quick_tip', name: 'Быстрый совет' },
-          score: 8.5,
-          reason: 'Тема хорошо подходит для объяснения основ в коротком формате',
-          content_ideas: ['Объяснить концепцию', 'Показать пример', 'Дать практический совет'],
-          expected_engagement: 0.85
-        },
-        {
-          rubric: { id: 'business_strategy', name: 'Бизнес стратегия' },
-          format: { id: 'case_study', name: 'Кейс-стади' },
-          score: 7.8,
-          reason: 'Можно разобрать как бизнес-кейс с практическими выводами',
-          content_ideas: ['Разбор ситуации', 'Анализ решений', 'Практические рекомендации'],
-          expected_engagement: 0.78
-        },
-        {
-          rubric: { id: 'personal_growth', name: 'Личное развитие' },
-          format: { id: 'deep_dive', name: 'Глубокий разбор' },
-          score: 7.2,
-          reason: 'Тема подходит для подробного разбора и рефлексии',
-          content_ideas: ['Анализ проблемы', 'Поиск решений', 'План действий'],
-          expected_engagement: 0.72
-        }
-      ]
+      const rubrics = rubricsResult || []
+      const formats = formatsResult || []
 
-      setCombinations(sampleCombinations)
-      setSelectedCombinations(new Array(sampleCombinations.length).fill(true))
+      // Создаем комбинации из реальных данных
+      const combinations: RubricFormatCombination[] = []
+
+      // Создаем топ-3 комбинаций на основе реальных рубрик и форматов
+      if (rubrics.length > 0 && formats.length > 0) {
+        // Выбираем первые 3 рубрики и 3 формата
+        const selectedRubrics = rubrics.slice(0, 3)
+        const selectedFormats = formats.slice(0, 3)
+
+        // Создаем все возможные комбинации
+        selectedRubrics.forEach((rubric, rubricIndex) => {
+          const format = selectedFormats[rubricIndex % selectedFormats.length]
+          combinations.push({
+            rubric: { id: rubric.id, name: rubric.name },
+            format: { id: format.id, name: format.name },
+            score: 8.5 - (rubricIndex * 0.3), // Уменьшаем оценку для разнообразия
+            reason: `Комбинация ${rubric.name} + ${format.name} подходит для данного контента`,
+            content_ideas: ['Показать пример', 'Дать практический совет', 'Объяснить концепцию'],
+            expected_engagement: 0.8 - (rubricIndex * 0.05)
+          })
+        })
+      } else {
+        // Fallback для случаев когда нет данных в БД
+        combinations.push(
+          {
+            rubric: { id: 'general', name: 'Общее' },
+            format: { id: 'quick_tip', name: 'Быстрый совет' },
+            score: 7.5,
+            reason: 'Универсальная комбинация для любого контента',
+            content_ideas: ['Показать пример', 'Дать практический совет'],
+            expected_engagement: 0.75
+          }
+        )
+      }
+
+      setCombinations(combinations)
+      setSelectedCombinations(new Array(combinations.length).fill(true))
+      setCombinationsLoaded(true)
     } catch (error) {
       console.error('Error loading combinations:', error)
+      // Fallback комбинация
+      const fallbackCombinations: RubricFormatCombination[] = [
+        {
+          rubric: { id: 'general', name: 'Общее' },
+          format: { id: 'quick_tip', name: 'Быстрый совет' },
+          score: 7.5,
+          reason: 'Универсальная комбинация для любого контента',
+          content_ideas: ['Показать пример', 'Дать практический совет'],
+          expected_engagement: 0.75
+        }
+      ]
+      setCombinations(fallbackCombinations)
+      setSelectedCombinations(new Array(fallbackCombinations.length).fill(true))
+      setCombinationsLoaded(true)
     } finally {
       setLoading(false)
     }
@@ -102,7 +135,7 @@ export function RubricFormatSelector({ post, analysis, onGenerate, onClose }: Ru
     const selectedItems = combinations.filter((_, index) => selectedCombinations[index])
 
     if (selectedItems.length === 0) {
-      alert('Выберите хотя бы одну комбинацию')
+      toast.error('Выберите хотя бы одну комбинацию')
       return
     }
 
@@ -112,7 +145,7 @@ export function RubricFormatSelector({ post, analysis, onGenerate, onClose }: Ru
       onClose()
     } catch (error) {
       console.error('Error generating scenarios:', error)
-      alert('Ошибка при генерации сценариев')
+      toast.error('Ошибка при генерации сценариев')
     } finally {
       setGenerating(false)
     }

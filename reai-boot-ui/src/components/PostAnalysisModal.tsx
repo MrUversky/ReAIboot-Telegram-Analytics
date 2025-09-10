@@ -6,6 +6,7 @@ import { Progress } from '@/components/ui/progress'
 import { Eye, Heart, MessageCircle, Share, TrendingUp, BarChart3, Target, Zap, CheckCircle, XCircle, Clock } from 'lucide-react'
 import { RubricFormatSelector } from './RubricFormatSelector'
 import { apiClient, Post } from '@/lib/api'
+import toast from 'react-hot-toast'
 
 interface PostAnalysisModalProps {
   post: Post
@@ -33,6 +34,7 @@ export function PostAnalysisModal({ post, onClose, onAnalysisComplete }: PostAna
     try {
       const result = await apiClient.quickAnalyzePost({
         message_id: post.message_id,
+        channel_username: post.channel_username,
         channel_title: post.channel_title,
         text: post.full_text,
         views: post.views,
@@ -50,7 +52,7 @@ export function PostAnalysisModal({ post, onClose, onAnalysisComplete }: PostAna
       }
     } catch (error) {
       console.error('Error in quick analysis:', error)
-      alert('Ошибка при анализе поста')
+      toast.error('Ошибка при анализе поста')
     } finally {
       setAnalyzing(false)
     }
@@ -73,15 +75,15 @@ export function PostAnalysisModal({ post, onClose, onAnalysisComplete }: PostAna
       })
 
       if (result.success) {
-        alert(`✅ Сгенерировано ${result.scenarios_generated} сценариев!\n\nРезультаты доступны в разделе "Сценарии"`)
+        toast.success(`✅ Сгенерировано ${result.scenarios_generated} сценариев!\n\nРезультаты доступны в разделе "Сценарии"`)
         onClose()
       } else {
-        alert('Ошибка при генерации сценариев')
+        toast.error('Ошибка при генерации сценариев')
         setCurrentStep('selecting')
       }
     } catch (error) {
       console.error('Error generating scenarios:', error)
-      alert('Ошибка при генерации сценариев')
+      toast.error('Ошибка при генерации сценариев')
       setCurrentStep('selecting')
     } finally {
       setGenerating(false)

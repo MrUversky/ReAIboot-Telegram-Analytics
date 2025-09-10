@@ -58,11 +58,18 @@ class GeneratorProcessor(BaseLLMProcessor):
             )
 
         try:
-            # Извлекаем данные
-            post_text = input_data.get("text", "")
+            # Извлекаем данные - проверяем разные поля для текста поста
+            post_text = input_data.get("text", "") or input_data.get("full_text", "") or input_data.get("post_text", "")
             rubric = input_data.get("rubric", {})
             reel_format = input_data.get("reel_format", {})
             analysis = input_data.get("analysis", {})
+
+            # Логируем входные данные для отладки
+            logger.info(f"GeneratorProcessor input_data keys: {list(input_data.keys())}")
+            logger.info(f"Post text length: {len(post_text)}")
+            logger.info(f"Post text preview: {post_text[:200] if post_text else 'EMPTY'}")
+            logger.info(f"Rubric: {rubric}")
+            logger.info(f"Reel format: {reel_format}")
 
             if not post_text:
                 return ProcessingResult(
@@ -73,6 +80,13 @@ class GeneratorProcessor(BaseLLMProcessor):
 
             # Получаем system и user промпты из базы данных
             from ..prompts import prompt_manager
+
+            # Определяем длительность по формату или используем дефолт
+            # Проверяем оба возможных названия поля: duration_seconds и duration
+            duration = reel_format.get('duration_seconds') or reel_format.get('duration')
+            if duration is None:
+                duration = 60  # Default to 60 seconds if not found
+
             system_prompt = prompt_manager.get_system_prompt("generate_scenario_system", {
                 "duration": duration
             })

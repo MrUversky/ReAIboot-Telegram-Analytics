@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSupabase } from '@/components/SupabaseProvider'
 import { PostCard } from '@/components/PostCard'
@@ -34,6 +34,17 @@ export default function PostsPage() {
   const { user, loading } = useSupabase()
   const [posts, setPosts] = useState<Post[]>([])
   const [loadingPosts, setLoadingPosts] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const [currentOffset, setCurrentOffset] = useState(0)
+  const currentOffsetRef = useRef(0)
+  const [totalPosts, setTotalPosts] = useState(0)
+  const [globalStats, setGlobalStats] = useState<{
+    total_views: number
+    total_reactions: number
+    total_forwards: number
+  } | null>(null)
+  const [loadingStats, setLoadingStats] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [sortBy, setSortBy] = useState<'date' | 'score' | 'views' | 'viral_score' | 'engagement_rate' | 'forwards' | 'reactions'>('viral_score')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
@@ -48,6 +59,145 @@ export default function PostsPage() {
   const [analyzingPost, setAnalyzingPost] = useState<Post | null>(null)
   const [analyzingPosts, setAnalyzingPosts] = useState<Set<string>>(new Set())
 
+  // Ref для IntersectionObserver
+  const loadMoreRef = useRef<HTMLDivElement>(null)
+
+  // Функция для получения фильтров для API
+  const getApiFilters = useCallback(() => {
+    const filters: any = {}
+
+    // Фильтр по каналу
+    if (filterChannel !== 'all') {
+      filters.channel_username = filterChannel
+    }
+
+    // Фильтр по дате
+    if (dateRange !== 'all') {
+      const endDate = new Date()
+      let startDate: Date | null = null
+
+      if (dateRange === '7d') {
+        startDate = new Date()
+        startDate.setDate(startDate.getDate() - 7)
+      } else if (dateRange === '30d') {
+        startDate = new Date()
+        startDate.setDate(startDate.getDate() - 30)
+      }
+
+      if (startDate) {
+        filters.date_from = startDate.toISOString()
+        filters.date_to = endDate.toISOString()
+      }
+    }
+
+    // Дополнительные фильтры
+    if (minViews > 0) {
+      filters.min_views = minViews
+    }
+    if (minEngagement > 0) {
+      filters.min_engagement = minEngagement
+    }
+    if (searchTerm.trim()) {
+      filters.search_term = searchTerm.trim()
+    }
+
+    // Фильтр виральных постов
+    if (showOnlyViral) {
+      filters.only_viral = true
+      filters.min_viral_score = minViralScore
+    }
+
+    return filters
+  }, [filterChannel, dateRange, minViews, minEngagement, searchTerm, showOnlyViral, minViralScore])
+
+  // Функция для загрузки общей статистики
+  const loadGlobalStats = useCallback(async () => {
+    try {
+      setLoadingStats(true)
+      const filters = getApiFilters()
+      const stats = await apiClient.getPostsStats(filters)
+      setGlobalStats(stats)
+    } catch (error) {
+      console.error('Error loading global stats:', error)
+      // В случае ошибки не показываем статистику
+      setGlobalStats(null)
+    } finally {
+      setLoadingStats(false)
+    }
+  }, [getApiFilters])
+
+  const loadPosts = useCallback(async (reset: boolean = true) => {
+    try {
+
+      if (reset) {
+        setLoadingPosts(true)
+        setCurrentOffset(0)
+        currentOffsetRef.current = 0
+        setHasMore(true)
+      } else {
+        setLoadingMore(true)
+      }
+
+      // Используем актуальное значение из ref
+      const offset = reset ? 0 : currentOffsetRef.current
+
+      const limit = 50 // Загружаем по 50 постов за раз
+      const filters = getApiFilters()
+
+      const response = await apiClient.getPosts(limit, offset, filters)
+
+      if (reset) {
+        // При сбросе - фильтруем дубликаты в самом ответе API
+        const uniquePosts = response.posts.filter((post, index, self) =>
+          index === self.findIndex(p => p.id === post.id)
+        )
+        setPosts(uniquePosts)
+        setTotalPosts(response.total || 0)
+        // Обновляем offset после первой загрузки
+        const newOffset = uniquePosts.length
+        setCurrentOffset(newOffset)
+        currentOffsetRef.current = newOffset
+      } else {
+        // При подгрузке - сначала получаем текущие посты и фильтруем дубликаты
+        setPosts(prevPosts => {
+          const existingIds = new Set(prevPosts.map(p => p.id))
+          // Также фильтруем дубликаты в самом ответе API
+          const uniqueNewPosts = response.posts
+            .filter((post, index, self) => index === self.findIndex(p => p.id === post.id))
+            .filter(p => !existingIds.has(p.id))
+
+          // Обновляем offset после успешной загрузки
+          const newOffset = prevPosts.length + uniqueNewPosts.length
+          setCurrentOffset(newOffset)
+          currentOffsetRef.current = newOffset
+          return [...prevPosts, ...uniqueNewPosts]
+        })
+      }
+
+      // hasMore теперь правильно определяется на бэкенде с учетом фильтров
+      setHasMore(response.hasMore)
+
+      // Extract unique channels (только при первой загрузке)
+      if (reset) {
+        const uniqueChannels = [...new Set(response.posts.map((post: Post) => post.channel_username))]
+        setChannels(uniqueChannels)
+      }
+    } catch (error) {
+      console.error('Error loading posts:', error)
+
+      // Показываем ошибку вместо тестовых данных
+      toast.error('Ошибка загрузки постов. Попробуйте обновить страницу.')
+      if (reset) {
+        setPosts([])
+        setTotalPosts(0)
+        setHasMore(false)
+      }
+    } finally {
+      setLoadingPosts(false)
+      setLoadingMore(false)
+    }
+  }, [getApiFilters])
+
   useEffect(() => {
     if (!loading && !user) {
       router.push('/auth')
@@ -56,16 +206,55 @@ export default function PostsPage() {
 
   useEffect(() => {
     if (user) {
-      loadPosts()
+      loadPosts(true)
+      loadGlobalStats()
     }
-  }, [user])
+  }, [user, loadPosts])
 
-  // Reload posts when filters change
+  // Reload posts and stats when filters change (debounced)
   useEffect(() => {
     if (user) {
-      loadPosts()
+      const timeoutId = setTimeout(() => {
+        loadPosts(true)
+        loadGlobalStats()
+      }, 300) // Debounce на 300ms
+
+      return () => clearTimeout(timeoutId)
     }
-  }, [user, dateRange, minViews, minEngagement])
+  }, [user, dateRange, minViews, minEngagement, filterChannel])
+
+  // IntersectionObserver для infinite scroll
+  useEffect(() => {
+    let isLoading = false // Флаг для предотвращения множественных вызовов
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+
+        if (entries[0].isIntersecting && hasMore && !loadingMore && !loadingPosts && !isLoading) {
+          isLoading = true
+
+          // Теперь используем актуальное значение из ref
+          loadPosts(false).finally(() => {
+            isLoading = false
+          })
+        }
+      },
+      { threshold: 0.1, rootMargin: '200px' } // Более агрессивные настройки для ранней загрузки
+    )
+
+    const currentRef = loadMoreRef.current
+
+    if (currentRef) {
+      observer.observe(currentRef)
+    }
+
+    return () => {
+      if (currentRef) {
+        observer.unobserve(currentRef)
+      }
+    }
+  }, [hasMore, loadingMore, loadingPosts])
 
   const updateSinglePost = async (postId: string) => {
     try {
@@ -81,58 +270,17 @@ export default function PostsPage() {
     } catch (error) {
       console.error('Error updating single post:', error)
       // В случае ошибки перезагружаем все посты
-      loadPosts()
+      loadPosts(true)
     }
   }
 
-  const loadPosts = async () => {
-    try {
-      setLoadingPosts(true)
 
-      // Calculate date filter
-      let limit = 1000 // Load more posts for filtering
-      const endDate = new Date()
-      let startDate: Date | null = null
-
-      if (dateRange === '7d') {
-        startDate = new Date()
-        startDate.setDate(startDate.getDate() - 7)
-        limit = 500 // Load more for 7 days
-      } else if (dateRange === '30d') {
-        startDate = new Date()
-        startDate.setDate(startDate.getDate() - 30)
-        limit = 1000 // Load more for 30 days
-      }
-
-      const response = await apiClient.getPosts(limit)
-      let postsData: Post[] = response
-
-      // Apply date filter on frontend if needed
-      if (startDate) {
-        postsData = postsData.filter((post: Post) => {
-          const postDate = new Date(post.date)
-          return postDate >= startDate! && postDate <= endDate
-        })
-      }
-
-      // Apply additional filters
-      postsData = postsData.filter((post: Post) => {
-        if (minViews > 0 && post.views < minViews) return false
-        if (minEngagement > 0 && (post.engagement_rate || 0) * 100 < minEngagement) return false
-        return true
-      })
-
-      setPosts(postsData)
-
-      // Extract unique channels
-      const uniqueChannels = [...new Set(postsData.map((post: Post) => post.channel_username))]
-      setChannels(uniqueChannels)
-    } catch (error) {
-      console.error('Error loading posts:', error)
-    } finally {
-      setLoadingPosts(false)
+  // Функция для загрузки дополнительных постов
+  const loadMorePosts = useCallback(() => {
+    if (!loadingMore && hasMore && !loadingPosts) {
+      loadPosts(false)
     }
-  }
+  }, [loadingMore, hasMore, loadingPosts, loadPosts])
 
   const handleQuickAnalyzePost = async (post: Post) => {
     // Добавляем пост в состояние загрузки
@@ -190,22 +338,10 @@ export default function PostsPage() {
 
   const handleAnalysisComplete = (result: any) => {
     // Обновляем список постов для отображения результатов анализа
-    loadPosts()
+    loadPosts(true)
   }
 
   const filteredAndSortedPosts = posts
-    .filter(post => {
-      const matchesSearch = searchTerm === '' ||
-        post.text_preview.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        post.channel_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        post.channel_username.toLowerCase().includes(searchTerm.toLowerCase())
-
-      const matchesChannel = filterChannel === 'all' || post.channel_username === filterChannel
-
-      const matchesViral = !showOnlyViral || (post.viral_score && post.viral_score >= minViralScore)
-
-      return matchesSearch && matchesChannel && matchesViral
-    })
     .sort((a, b) => {
       let aValue: number, bValue: number
 
@@ -269,7 +405,7 @@ export default function PostsPage() {
             Просмотр и анализ постов из Telegram каналов
           </p>
         </div>
-        <Button onClick={loadPosts} disabled={loadingPosts}>
+        <Button onClick={() => loadPosts(true)} disabled={loadingPosts}>
           {loadingPosts ? (
             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
           ) : (
@@ -287,7 +423,7 @@ export default function PostsPage() {
               <FileText className="w-8 h-8 text-blue-600" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Всего постов</p>
-                <p className="text-2xl font-bold text-gray-900">{posts.length}</p>
+                <p className="text-2xl font-bold text-gray-900">{totalPosts?.toLocaleString() || '0'}</p>
               </div>
             </div>
           </CardContent>
@@ -316,9 +452,15 @@ export default function PostsPage() {
               <Eye className="w-8 h-8 text-purple-600" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Общие просмотры</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {posts.reduce((sum, post) => sum + post.views, 0).toLocaleString()}
-                </p>
+                <div className="text-2xl font-bold text-gray-900">
+                  {loadingStats ? (
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
+                  ) : globalStats ? (
+                    globalStats.total_views.toLocaleString()
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
+                </div>
               </div>
             </div>
           </CardContent>
@@ -329,10 +471,16 @@ export default function PostsPage() {
             <div className="flex items-center">
               <Heart className="w-8 h-8 text-red-600" />
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Реакции</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {posts.reduce((sum, post) => sum + post.reactions, 0).toLocaleString()}
-                </p>
+                <p className="text-sm font-medium text-gray-600">Общие реакции</p>
+                <div className="text-2xl font-bold text-gray-900">
+                  {loadingStats ? (
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600"></div>
+                  ) : globalStats ? (
+                    globalStats.total_reactions.toLocaleString()
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
+                </div>
               </div>
             </div>
           </CardContent>
@@ -441,35 +589,53 @@ export default function PostsPage() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <Label className="text-sm font-medium">Мин. просмотры</Label>
-              <Input
-                type="number"
-                placeholder="0"
-                value={minViews}
-                onChange={(e) => setMinViews(Number(e.target.value) || 0)}
-                className="mt-1"
-              />
+              <Label className="text-sm font-medium text-gray-400">Мин. просмотры</Label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  placeholder="0"
+                  value={minViews}
+                  onChange={(e) => setMinViews(Number(e.target.value) || 0)}
+                  className="mt-1 opacity-50"
+                  disabled
+                />
+                <span className="absolute top-2 right-3 text-xs text-gray-500 font-medium">
+                  В разработке
+                </span>
+              </div>
             </div>
             <div>
-              <Label className="text-sm font-medium">Мин. вовлеченность (%)</Label>
-              <Input
-                type="number"
-                placeholder="0"
-                value={minEngagement}
-                onChange={(e) => setMinEngagement(Number(e.target.value) || 0)}
-                className="mt-1"
-              />
+              <Label className="text-sm font-medium text-gray-400">Мин. вовлеченность (%)</Label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  placeholder="0"
+                  value={minEngagement}
+                  onChange={(e) => setMinEngagement(Number(e.target.value) || 0)}
+                  className="mt-1 opacity-50"
+                  disabled
+                />
+                <span className="absolute top-2 right-3 text-xs text-gray-500 font-medium">
+                  В разработке
+                </span>
+              </div>
             </div>
             <div>
-              <Label className="text-sm font-medium">Мин. viral score</Label>
-              <Input
-                type="number"
-                step="0.1"
-                placeholder="1.0"
-                value={minViralScore}
-                onChange={(e) => setMinViralScore(Number(e.target.value) || 1.0)}
-                className="mt-1"
-              />
+              <Label className="text-sm font-medium text-gray-400">Мин. viral score</Label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  step="0.1"
+                  placeholder="1.0"
+                  value={minViralScore}
+                  onChange={(e) => setMinViralScore(Number(e.target.value) || 1.0)}
+                  className="mt-1 opacity-50"
+                  disabled
+                />
+                <span className="absolute top-2 right-3 text-xs text-gray-500 font-medium">
+                  В разработке
+                </span>
+              </div>
             </div>
             <div className="flex items-end">
               <Button
@@ -513,17 +679,47 @@ export default function PostsPage() {
             </Card>
           ))
         ) : filteredAndSortedPosts.length > 0 ? (
-          filteredAndSortedPosts.map((post) => (
-            <PostCard
-              key={post.id}
-              post={post}
-              onQuickAnalyze={handleQuickAnalyzePost}
-              onAnalyze={handleAnalyzePost}
-              showQuickAnalysis={true}
-              showAnalysis={true}
-              isAnalyzing={analyzingPosts.has(post.id)}
-            />
-          ))
+          <>
+            {filteredAndSortedPosts.map((post) => (
+              <PostCard
+                key={post.id}
+                post={post}
+                onQuickAnalyze={handleQuickAnalyzePost}
+                onAnalyze={handleAnalyzePost}
+                showQuickAnalysis={true}
+                showAnalysis={true}
+                isAnalyzing={analyzingPosts.has(post.id)}
+              />
+            ))}
+
+            {/* Элемент для IntersectionObserver - подгрузка дополнительных постов */}
+            {hasMore && (
+              <div
+                ref={loadMoreRef}
+                className="col-span-full flex justify-center items-center py-8"
+              >
+                {loadingMore ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                    <span className="text-gray-600">Загрузка постов...</span>
+                  </div>
+                ) : (
+                  <div className="text-gray-500 text-sm">
+                    Прокрутите вниз для загрузки ещё постов
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Сообщение о конце списка */}
+            {!hasMore && posts.length > 0 && (
+              <div className="col-span-full text-center py-8">
+                <p className="text-gray-500 text-sm">
+                  Все посты загружены ({posts.length} из {totalPosts?.toLocaleString() || '0'})
+                </p>
+              </div>
+            )}
+          </>
         ) : (
           <div className="col-span-full text-center py-12">
             <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
@@ -549,3 +745,4 @@ export default function PostsPage() {
     </div>
   )
 }
+

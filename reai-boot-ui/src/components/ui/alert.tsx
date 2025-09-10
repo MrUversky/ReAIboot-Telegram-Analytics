@@ -1,60 +1,57 @@
 import React from 'react'
-import { AlertTriangle, CheckCircle, Info, XCircle } from 'lucide-react'
+import { cn } from '../../lib/utils'
 
-interface AlertProps {
-  children: React.ReactNode
-  className?: string
+interface AlertProps extends React.HTMLAttributes<HTMLDivElement> {
   variant?: 'default' | 'destructive' | 'success' | 'warning'
 }
 
-export function Alert({ children, className = '', variant = 'default' }: AlertProps) {
-  const getVariantClasses = () => {
-    switch (variant) {
-      case 'destructive':
-        return 'border-red-200 bg-red-50 text-red-900'
-      case 'success':
-        return 'border-green-200 bg-green-50 text-green-900'
-      case 'warning':
-        return 'border-yellow-200 bg-yellow-50 text-yellow-900'
-      default:
-        return 'border-blue-200 bg-blue-50 text-blue-900'
+const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
+  ({ className, variant = 'default', ...props }, ref) => {
+    const variants = {
+      default: 'border-blue-200 bg-blue-50 text-blue-900',
+      destructive: 'border-red-200 bg-red-50 text-red-900',
+      success: 'border-green-200 bg-green-50 text-green-900',
+      warning: 'border-yellow-200 bg-yellow-50 text-yellow-900'
     }
+
+    return (
+      <div
+        ref={ref}
+        role="alert"
+        className={cn(
+          'relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4',
+          variants[variant],
+          className
+        )}
+        {...props}
+      />
+    )
   }
+)
+Alert.displayName = 'Alert'
 
-  return (
-    <div className={`p-4 border rounded-lg ${getVariantClasses()} ${className}`}>
-      {children}
-    </div>
-  )
-}
+const AlertTitle = React.forwardRef<
+  HTMLParagraphElement,
+  React.HTMLAttributes<HTMLHeadingElement>
+>(({ className, ...props }, ref) => (
+  <h5
+    ref={ref}
+    className={cn('mb-1 font-medium leading-none tracking-tight', className)}
+    {...props}
+  />
+))
+AlertTitle.displayName = 'AlertTitle'
 
-interface AlertDescriptionProps {
-  children: React.ReactNode
-  className?: string
-}
+const AlertDescription = React.forwardRef<
+  HTMLParagraphElement,
+  React.HTMLAttributes<HTMLParagraphElement>
+>(({ className, ...props }, ref) => (
+  <div
+    ref={ref}
+    className={cn('text-sm [&_p]:leading-relaxed', className)}
+    {...props}
+  />
+))
+AlertDescription.displayName = 'AlertDescription'
 
-export function AlertDescription({ children, className = '' }: AlertDescriptionProps) {
-  return (
-    <div className={`text-sm ${className}`}>
-      {children}
-    </div>
-  )
-}
-
-// Icon components for alerts
-export function AlertIcon({ type = 'info', className = '' }: { type?: 'info' | 'success' | 'warning' | 'error', className?: string }) {
-  const getIcon = () => {
-    switch (type) {
-      case 'success':
-        return <CheckCircle className={`h-4 w-4 ${className}`} />
-      case 'warning':
-        return <AlertTriangle className={`h-4 w-4 ${className}`} />
-      case 'error':
-        return <XCircle className={`h-4 w-4 ${className}`} />
-      default:
-        return <Info className={`h-4 w-4 ${className}`} />
-    }
-  }
-
-  return getIcon()
-}
+export { Alert, AlertTitle, AlertDescription }
