@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { debounce } from 'lodash'
 import { useSupabase } from '@/components/SupabaseProvider'
 import { PostCard } from '@/components/PostCard'
 import { PostAnalysisModal } from '@/components/PostAnalysisModal'
@@ -46,6 +47,8 @@ export default function PostsPage() {
   } | null>(null)
   const [loadingStats, setLoadingStats] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
+  const [isSearchActive, setIsSearchActive] = useState(false)
   const [sortBy, setSortBy] = useState<'date' | 'score' | 'views' | 'viral_score' | 'engagement_rate' | 'forwards' | 'reactions'>('viral_score')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [filterChannel, setFilterChannel] = useState<string>('all')
@@ -97,8 +100,8 @@ export default function PostsPage() {
     if (minEngagement > 0) {
       filters.min_engagement = minEngagement
     }
-    if (searchTerm.trim()) {
-      filters.search_term = searchTerm.trim()
+    if (debouncedSearchTerm.trim()) {
+      filters.search_term = debouncedSearchTerm.trim()
     }
 
     // Фильтр виральных постов
@@ -108,7 +111,23 @@ export default function PostsPage() {
     }
 
     return filters
-  }, [filterChannel, dateRange, minViews, minEngagement, searchTerm, showOnlyViral, minViralScore])
+  }, [filterChannel, dateRange, minViews, minEngagement, debouncedSearchTerm, showOnlyViral, minViralScore])
+
+  // Debounce для поискового запроса (ждем 500мс после последнего ввода)
+  useEffect(() => {
+    setIsSearchActive(true)
+
+    const debouncedUpdate = debounce(() => {
+      setDebouncedSearchTerm(searchTerm)
+      setIsSearchActive(false)
+    }, 500)
+
+    debouncedUpdate()
+
+    return () => {
+      debouncedUpdate.cancel()
+    }
+  }, [searchTerm])
 
   // Функция для загрузки общей статистики
   const loadGlobalStats = useCallback(async () => {
@@ -221,7 +240,7 @@ export default function PostsPage() {
 
       return () => clearTimeout(timeoutId)
     }
-  }, [user, dateRange, minViews, minEngagement, filterChannel])
+  }, [user, dateRange, minViews, minEngagement, filterChannel, debouncedSearchTerm])
 
   // IntersectionObserver для infinite scroll
   useEffect(() => {
@@ -500,7 +519,13 @@ export default function PostsPage() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              {isSearchActive ? (
+                <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                </div>
+              ) : (
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              )}
               <Input
                 placeholder="Поиск по тексту или каналу..."
                 value={searchTerm}
