@@ -31,7 +31,12 @@ import {
   BarChart3,
   DollarSign,
   AlertCircle,
-  FlaskRound
+  FlaskRound,
+  Search,
+  Filter,
+  Download,
+  Play,
+  RotateCcw
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { apiClient } from '@/lib/api'
@@ -53,6 +58,86 @@ interface SystemStats {
   total_posts: number
   recent_posts: number
   total_tokens: number
+}
+
+// JSON Highlighter компонент
+const JsonHighlighter = ({ data }: { data: any }) => {
+  const highlightJson = (obj: any, indent = 0): JSX.Element => {
+    const indentStr = '  '.repeat(indent)
+
+    if (obj === null) {
+      return <span className="text-blue-600">null</span>
+    }
+
+    if (typeof obj === 'boolean') {
+      return <span className="text-purple-600">{obj.toString()}</span>
+    }
+
+    if (typeof obj === 'number') {
+      return <span className="text-green-600">{obj}</span>
+    }
+
+    if (typeof obj === 'string') {
+      return <span className="text-red-600">"{obj}"</span>
+    }
+
+    if (Array.isArray(obj)) {
+      if (obj.length === 0) {
+        return <span className="text-gray-600">[]</span>
+      }
+
+      return (
+        <span>
+          [<br />
+          {obj.map((item, index) => (
+            <span key={index}>
+              {indentStr}  {highlightJson(item, indent + 1)}
+              {index < obj.length - 1 ? ',' : ''}
+              <br />
+            </span>
+          ))}
+          {indentStr}]
+        </span>
+      )
+    }
+
+    if (typeof obj === 'object') {
+      const keys = Object.keys(obj)
+      if (keys.length === 0) {
+        return <span className="text-gray-600">{'{}'}</span>
+      }
+
+      return (
+        <span>
+          {'{'}<br />
+          {keys.map((key, index) => (
+            <span key={key}>
+              {indentStr}  <span className="text-blue-800">"{key}"</span>: {highlightJson(obj[key], indent + 1)}
+              {index < keys.length - 1 ? ',' : ''}
+              <br />
+            </span>
+          ))}
+          {indentStr}{'}'}
+        </span>
+      )
+    }
+
+    return <span className="text-gray-600">{String(obj)}</span>
+  }
+
+  try {
+    return (
+      <div className="font-mono text-xs overflow-x-auto">
+        {highlightJson(data)}
+      </div>
+    )
+  } catch (error) {
+    return (
+      <div className="text-red-600 text-xs">
+        Ошибка отображения JSON: {String(error)}
+      </div>
+    )
+  }
 }
 
 export default function AdminPage() {
@@ -88,6 +173,16 @@ export default function AdminPage() {
   const [sandboxPostData, setSandboxPostData] = useState('')
   const [sandboxResult, setSandboxResult] = useState<any>(null)
   const [sandboxLoading, setSandboxLoading] = useState(false)
+  const [logSearchTerm, setLogSearchTerm] = useState('')
+  const [logFilterType, setLogFilterType] = useState<string>('all')
+  const [logFilterSuccess, setLogFilterSuccess] = useState<string>('all')
+  const [jsonError, setJsonError] = useState<string>('')
+
+  // Step-by-step execution state
+  const [stepByStepMode, setStepByStepMode] = useState(false)
+  const [currentStep, setCurrentStep] = useState(0)
+  const [stepResults, setStepResults] = useState<any[]>([])
+  const [canExecuteNext, setCanExecuteNext] = useState(false)
 
   // LLM Prices state
   const [showPricesModal, setShowPricesModal] = useState(false)
@@ -492,24 +587,79 @@ export default function AdminPage() {
     setShowPricesModal(true)
   }
 
+  // Функция валидации JSON данных поста
+  const validatePostData = (jsonString: string) => {
+    if (!jsonString.trim()) {
+      return { isValid: false, error: 'Введите данные поста в формате JSON' }
+    }
+
+    try {
+      const data = JSON.parse(jsonString)
+
+      // Проверяем обязательные поля
+      const requiredFields = ['id', 'message_id', 'channel_username', 'text']
+      const missingFields = requiredFields.filter(field => !data[field])
+
+      if (missingFields.length > 0) {
+        return {
+          isValid: false,
+          error: `Отсутствуют обязательные поля: ${missingFields.join(', ')}`
+        }
+      }
+
+      // Проверяем типы данных
+      if (typeof data.message_id !== 'number') {
+        return { isValid: false, error: 'message_id должен быть числом' }
+      }
+
+      if (typeof data.text !== 'string' || data.text.length === 0) {
+        return { isValid: false, error: 'text должен быть непустой строкой' }
+      }
+
+      if (typeof data.channel_username !== 'string' || !data.channel_username.startsWith('@')) {
+        return { isValid: false, error: 'channel_username должен начинаться с @' }
+      }
+
+      // Проверяем опциональные поля
+      if (data.views !== undefined && (typeof data.views !== 'number' || data.views < 0)) {
+        return { isValid: false, error: 'views должен быть неотрицательным числом' }
+      }
+
+      if (data.forwards !== undefined && (typeof data.forwards !== 'number' || data.forwards < 0)) {
+        return { isValid: false, error: 'forwards должен быть неотрицательным числом' }
+      }
+
+      if (data.reactions !== undefined && (typeof data.reactions !== 'number' || data.reactions < 0)) {
+        return { isValid: false, error: 'reactions должен быть неотрицательным числом' }
+      }
+
+      return { isValid: true, data }
+
+    } catch (error) {
+      return { isValid: false, error: 'Некорректный JSON формат' }
+    }
+  }
+
   const handleTestSandbox = async () => {
-    if (!sandboxPostData.trim()) {
-      alert('Введите данные поста для тестирования')
+    // Валидируем данные
+    const validation = validatePostData(sandboxPostData)
+
+    if (!validation.isValid) {
+      setJsonError(validation.error)
       return
     }
 
+    setJsonError('') // Сбрасываем ошибку
     setSandboxLoading(true)
-    try {
-      // Парсим JSON данные поста
-      const postData = JSON.parse(sandboxPostData)
 
+    try {
       const response = await fetch('/api/sandbox/test-pipeline', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          post_data: postData,
+          post_data: validation.data,
           options: {
             debug_mode: true,
             step_by_step: false
@@ -524,12 +674,167 @@ export default function AdminPage() {
       const result = await response.json()
 
       setSandboxResult(result)
+      // Сбросить фильтры при новом результате
+      setLogSearchTerm('')
+      setLogFilterType('all')
+      setLogFilterSuccess('all')
     } catch (error) {
       console.error('Error testing sandbox:', error)
-      alert('Ошибка при тестировании песочницы')
+      setJsonError('Ошибка при тестировании песочницы: ' + error.message)
     } finally {
       setSandboxLoading(false)
     }
+  }
+
+  // Функция фильтрации логов
+  const getFilteredLogs = () => {
+    if (!sandboxResult?.debug_log) return []
+
+    let filtered = sandboxResult.debug_log
+
+    // Фильтр по типу
+    if (logFilterType !== 'all') {
+      filtered = filtered.filter((log: any) => log.step_type === logFilterType)
+    }
+
+    // Фильтр по успешности (для шагов)
+    if (logFilterSuccess !== 'all') {
+      const successValue = logFilterSuccess === 'success'
+      filtered = filtered.filter((log: any) => {
+        const data = log.data || {}
+        if (log.step_type === 'llm_response') {
+          return data.success === successValue
+        }
+        return true // Для других типов не фильтруем по успеху
+      })
+    }
+
+    // Поиск по тексту
+    if (logSearchTerm.trim()) {
+      const searchLower = logSearchTerm.toLowerCase()
+      filtered = filtered.filter((log: any) => {
+        const stepName = log.step_name?.toLowerCase() || ''
+        const stepType = log.step_type?.toLowerCase() || ''
+        const dataStr = JSON.stringify(log.data || {}).toLowerCase()
+        return stepName.includes(searchLower) ||
+               stepType.includes(searchLower) ||
+               dataStr.includes(searchLower)
+      })
+    }
+
+    return filtered
+  }
+
+  // Функция экспорта результатов в JSON
+  const handleExportResults = () => {
+    if (!sandboxResult) return
+
+    let postData
+    try {
+      postData = JSON.parse(sandboxPostData || '{}')
+    } catch (error) {
+      postData = { error: 'Invalid JSON in input', raw_text: sandboxPostData }
+    }
+
+    const exportData = {
+      timestamp: new Date().toISOString(),
+      sandbox_version: "1.0",
+      input_data: {
+        post_data: postData,
+        options: {
+          debug_mode: true,
+          step_by_step: stepByStepMode
+        }
+      },
+      results: sandboxResult,
+      filters_applied: {
+        search_term: logSearchTerm,
+        filter_type: logFilterType,
+        filter_success: logFilterSuccess
+      },
+      filtered_logs_count: getFilteredLogs().length,
+      total_logs_count: sandboxResult.debug_log?.length || 0
+    }
+
+    const dataStr = JSON.stringify(exportData, null, 2)
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
+
+    const exportFileDefaultName = `sandbox-results-${sandboxResult.post_id}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`
+
+    const linkElement = document.createElement('a')
+    linkElement.setAttribute('href', dataUri)
+    linkElement.setAttribute('download', exportFileDefaultName)
+    linkElement.click()
+  }
+
+  // Функции пошагового выполнения
+  const startStepByStepExecution = () => {
+    const validation = validatePostData(sandboxPostData)
+    if (!validation.isValid) {
+      setJsonError(validation.error)
+      return
+    }
+
+    setJsonError('')
+    setStepByStepMode(true)
+    setCurrentStep(0)
+    setStepResults([])
+    setCanExecuteNext(true)
+  }
+
+  const executeCurrentStep = async () => {
+    if (!canExecuteNext) return
+
+    setSandboxLoading(true)
+    try {
+      const validation = validatePostData(sandboxPostData)
+      const stepData = {
+        post_data: validation.data,
+        options: {
+          debug_mode: true,
+          step_by_step: true,
+          current_step: currentStep,
+          previous_results: stepResults
+        }
+      }
+
+      const response = await fetch('/api/sandbox/test-pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stepData)
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+
+      // Добавляем результат текущего шага
+      const newStepResults = [...stepResults]
+      newStepResults[currentStep] = result
+      setStepResults(newStepResults)
+
+      // Переходим к следующему шагу
+      setCurrentStep(currentStep + 1)
+
+      // Проверяем, можем ли выполнить следующий шаг
+      setCanExecuteNext(result.success || currentStep < 2) // Можно продолжать даже при неудаче фильтрации
+
+    } catch (error) {
+      console.error('Error executing step:', error)
+      setJsonError('Ошибка выполнения шага: ' + error.message)
+    } finally {
+      setSandboxLoading(false)
+    }
+  }
+
+  const resetStepByStepExecution = () => {
+    setStepByStepMode(false)
+    setCurrentStep(0)
+    setStepResults([])
+    setCanExecuteNext(false)
+    setSandboxResult(null)
   }
 
   const handleConfigureViral = async () => {
@@ -2942,6 +3247,40 @@ export default function AdminPage() {
                     </p>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    {/* Переключатель режима выполнения */}
+                    <div className="flex items-center space-x-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="radio"
+                          id="normal_mode"
+                          name="execution_mode"
+                          checked={!stepByStepMode}
+                          onChange={() => {
+                            if (stepByStepMode) resetStepByStepExecution()
+                          }}
+                          className="text-blue-600"
+                        />
+                        <Label htmlFor="normal_mode" className="text-sm font-medium">
+                          Полный pipeline
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="radio"
+                          id="step_by_step_mode"
+                          name="execution_mode"
+                          checked={stepByStepMode}
+                          onChange={() => {
+                            if (!stepByStepMode) startStepByStepExecution()
+                          }}
+                          className="text-blue-600"
+                        />
+                        <Label htmlFor="step_by_step_mode" className="text-sm font-medium">
+                          Пошаговое выполнение
+                        </Label>
+                      </div>
+                    </div>
+
                     <div>
                       <Label className="text-sm font-medium mb-2 block">
                         Данные поста (JSON)
@@ -2958,65 +3297,270 @@ export default function AdminPage() {
   "reactions": 25
 }`}
                         value={sandboxPostData}
-                        onChange={(e) => setSandboxPostData(e.target.value)}
-                        className="min-h-[120px] font-mono text-sm"
+                        onChange={(e) => {
+                          setSandboxPostData(e.target.value)
+                          setJsonError('') // Сбрасываем ошибку при изменении
+                        }}
+                        className={`min-h-[120px] font-mono text-sm ${
+                          jsonError ? 'border-red-500 focus:border-red-500' : ''
+                        }`}
                       />
+                      {jsonError && (
+                        <div className="mt-2 text-sm text-red-600 bg-red-50 p-2 rounded border border-red-200">
+                          <strong>Ошибка валидации:</strong> {jsonError}
+                        </div>
+                      )}
                     </div>
 
-                    <div className="flex gap-4">
-                      <Button
-                        onClick={handleTestSandbox}
-                        disabled={sandboxLoading || !sandboxPostData.trim()}
-                        className="flex-1"
-                      >
-                        {sandboxLoading ? (
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        ) : (
-                          <FlaskRound className="w-4 h-4 mr-2" />
+                    {/* Кнопки управления */}
+                    {stepByStepMode ? (
+                      <div className="space-y-4">
+                        {/* Индикатор текущего шага */}
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <span className="text-sm font-medium">Текущий шаг:</span>
+                            <span className="ml-2 text-sm text-blue-600">
+                              {currentStep === 0 && "Подготовка данных"}
+                              {currentStep === 1 && "Фильтрация поста"}
+                              {currentStep === 2 && "Анализ поста"}
+                              {currentStep === 3 && "Выбор рубрик"}
+                              {currentStep === 4 && "Генерация сценариев"}
+                              {currentStep >= 5 && "Завершено"}
+                            </span>
+                          </div>
+                          <Badge variant={canExecuteNext ? "default" : "secondary"}>
+                            {canExecuteNext ? "Готов к выполнению" : "Ожидание"}
+                          </Badge>
+                        </div>
+
+                        {/* Результаты предыдущих шагов */}
+                        {stepResults.length > 0 && (
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-medium">Выполненные шаги:</h4>
+                            {stepResults.map((result, index) => (
+                              <div key={index} className="flex items-center justify-between text-xs p-2 bg-green-50 rounded border">
+                                <span>Шаг {index + 1}: {result.success ? "✅ Успешно" : "❌ Ошибка"}</span>
+                                <span>{result.total_tokens || 0} токенов</span>
+                              </div>
+                            ))}
+                          </div>
                         )}
-                        {sandboxLoading ? 'Тестируем...' : 'Запустить тест'}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setSandboxPostData('')
-                          setSandboxResult(null)
-                        }}
-                      >
-                        Очистить
-                      </Button>
-                    </div>
+
+                        {/* Кнопки управления */}
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={executeCurrentStep}
+                            disabled={sandboxLoading || !canExecuteNext}
+                            className="flex-1"
+                          >
+                            {sandboxLoading ? (
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            ) : (
+                              <Play className="w-4 h-4 mr-2" />
+                            )}
+                            {sandboxLoading ? 'Выполняем...' : 'Выполнить шаг'}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={resetStepByStepExecution}
+                          >
+                            <RotateCcw className="w-4 h-4 mr-2" />
+                            Сброс
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-4">
+                        <Button
+                          onClick={handleTestSandbox}
+                          disabled={sandboxLoading || !sandboxPostData.trim()}
+                          className="flex-1"
+                        >
+                          {sandboxLoading ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          ) : (
+                            <FlaskRound className="w-4 h-4 mr-2" />
+                          )}
+                          {sandboxLoading ? 'Тестируем...' : 'Запустить тест'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setSandboxPostData('')
+                            setSandboxResult(null)
+                          }}
+                        >
+                          Очистить
+                        </Button>
+                      </div>
+                    )}
 
                     {sandboxResult && (
                       <div className="mt-6">
                         <h3 className="text-lg font-medium mb-4">Результаты тестирования</h3>
-                        <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+
+                        {/* Основная информация */}
+                        <div className="bg-gray-50 rounded-lg p-4 space-y-3 mb-6">
                           <div className="flex items-center justify-between">
                             <span className="font-medium">Статус:</span>
                             <Badge variant={sandboxResult.success ? "default" : "secondary"}>
                               {sandboxResult.success ? "Успешно" : "Ошибка"}
                             </Badge>
                           </div>
-                          <div>
-                            <span className="font-medium">Post ID:</span>
-                            <code className="ml-2 bg-white px-2 py-1 rounded text-sm">
-                              {sandboxResult.post_id}
-                            </code>
-                          </div>
-                          <div>
-                            <span className="font-medium">Этапы pipeline:</span>
-                            <div className="mt-2 space-y-1">
-                              {sandboxResult.steps?.map((step: any) => (
-                                <div key={step.step} className="flex items-center justify-between text-sm">
-                                  <span>{step.step}. {step.description}</span>
-                                  <Badge variant="outline" className="text-xs">
-                                    {step.status}
-                                  </Badge>
-                                </div>
-                              ))}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <span className="font-medium text-sm">Post ID:</span>
+                              <code className="ml-2 bg-white px-2 py-1 rounded text-sm">
+                                {sandboxResult.post_id}
+                              </code>
+                            </div>
+                            <div>
+                              <span className="font-medium text-sm">Токенов использовано:</span>
+                              <span className="ml-2 text-sm">{sandboxResult.total_tokens || 0}</span>
                             </div>
                           </div>
+                          <div>
+                            <span className="font-medium text-sm">Время выполнения:</span>
+                            <span className="ml-2 text-sm">{(sandboxResult.total_time || 0).toFixed(2)} сек</span>
+                          </div>
                         </div>
+
+                        {/* Этапы pipeline */}
+                        <div className="mb-6">
+                          <h4 className="text-md font-medium mb-3">Этапы pipeline</h4>
+                          <div className="space-y-2">
+                            {sandboxResult.steps?.map((step: any) => (
+                              <div key={step.step} className="border rounded-lg p-3 bg-white">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="font-medium text-sm">{step.step}. {step.name}</span>
+                                  <div className="flex items-center space-x-2">
+                                    <Badge variant={step.success ? "default" : "secondary"} className="text-xs">
+                                      {step.status}
+                                    </Badge>
+                                    <span className="text-xs text-gray-500">
+                                      {step.tokens_used} токенов
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  {step.description}
+                                </div>
+                                {step.processing_time && (
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    Время: {(step.processing_time * 1000).toFixed(0)}мс
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Debug лог */}
+                        {sandboxResult.debug_log && sandboxResult.debug_log.length > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="text-md font-medium">
+                                Debug лог ({getFilteredLogs().length} из {sandboxResult.debug_log.length} записей)
+                              </h4>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleExportResults}
+                                  className="text-xs"
+                                  disabled={!sandboxResult}
+                                >
+                                  <Download className="w-3 h-3 mr-1" />
+                                  Экспорт JSON
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setLogSearchTerm('')
+                                    setLogFilterType('all')
+                                    setLogFilterSuccess('all')
+                                  }}
+                                  className="text-xs"
+                                >
+                                  Сбросить фильтры
+                                </Button>
+                              </div>
+                            </div>
+
+                            {/* Панель фильтров */}
+                            <div className="bg-gray-50 rounded-lg p-3 mb-4 space-y-3">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                {/* Поиск */}
+                                <div className="relative">
+                                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                                  <Input
+                                    placeholder="Поиск по логам..."
+                                    value={logSearchTerm}
+                                    onChange={(e) => setLogSearchTerm(e.target.value)}
+                                    className="pl-9 text-sm"
+                                  />
+                                </div>
+
+                                {/* Фильтр по типу */}
+                                <Select value={logFilterType} onValueChange={setLogFilterType}>
+                                  <SelectTrigger className="text-sm">
+                                    <SelectValue placeholder="Тип шага" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">Все типы</SelectItem>
+                                    <SelectItem value="info">Информация</SelectItem>
+                                    <SelectItem value="llm_call">LLM запрос</SelectItem>
+                                    <SelectItem value="llm_response">LLM ответ</SelectItem>
+                                  </SelectContent>
+                                </Select>
+
+                                {/* Фильтр по статусу */}
+                                <Select value={logFilterSuccess} onValueChange={setLogFilterSuccess}>
+                                  <SelectTrigger className="text-sm">
+                                    <SelectValue placeholder="Статус" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">Все статусы</SelectItem>
+                                    <SelectItem value="success">Успешные</SelectItem>
+                                    <SelectItem value="failed">Неуспешные</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            {/* Список логов */}
+                            <div className="border rounded-lg bg-white max-h-96 overflow-y-auto">
+                              <div className="p-3 space-y-2">
+                                {getFilteredLogs().length === 0 ? (
+                                  <div className="text-center py-8 text-gray-500">
+                                    <Filter className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                                    <p className="text-sm">Нет записей, соответствующих фильтрам</p>
+                                  </div>
+                                ) : (
+                                  getFilteredLogs().map((log: any, index: number) => (
+                                    <div key={index} className="border-l-2 border-blue-200 pl-3 py-2">
+                                      <div className="flex items-center justify-between mb-1">
+                                        <span className="font-medium text-sm">{log.step_name}</span>
+                                        <div className="flex items-center space-x-2">
+                                          <Badge variant="outline" className="text-xs">
+                                            {log.step_type}
+                                          </Badge>
+                                          <span className="text-xs text-gray-500">
+                                            {(log.timestamp || 0).toFixed(3)}s
+                                          </span>
+                                        </div>
+                                      </div>
+                                    <div className="text-xs bg-gray-50 p-2 rounded border">
+                                      <JsonHighlighter data={log.data} />
+                                    </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </CardContent>
