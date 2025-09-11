@@ -69,6 +69,11 @@ class LLMOrchestrator:
         self.current_session_id = None
 
         logger.info(f"Доступность процессоров: {self.available_processors}")
+        # Debug: Логируем инициализацию
+        self._log_debug_step("orchestrator_init", "info", {
+            "message": f"Доступность процессоров: {self.available_processors}",
+            "processors": self.available_processors
+        })
 
     def enable_debug_mode(self, session_id: Optional[str] = None):
         """Включает debug режим для детального логирования."""
@@ -136,12 +141,24 @@ class LLMOrchestrator:
         })
 
         logger.info(f"Начинаем 4-этапную обработку поста {post_id}")
+        # Debug: Логируем начало обработки
+        self._log_debug_step("pipeline_start", "info", {
+            "message": f"Начинаем 4-этапную обработку поста {post_id}",
+            "post_id": post_id,
+            "stages": ["filter", "analysis", "rubric_selection", "generation"]
+        })
 
         try:
             # Этап 1: Фильтрация (если не пропускается)
             filter_result = None
             if not skip_filter:
                 logger.info(f"Этап 1: Фильтрация поста {post_id}")
+                # Debug: Логируем начало фильтрации
+                self._log_debug_step("filter_start", "info", {
+                    "message": f"Этап 1: Фильтрация поста {post_id}",
+                    "stage": "filter",
+                    "post_id": post_id
+                })
 
                 # Debug: Логируем промпты фильтрации
                 filter_system_prompt = prompt_manager.get_system_prompt("filter_posts_system", {
@@ -214,6 +231,13 @@ class LLMOrchestrator:
             if not skip_analysis:
                 logger.info(f"Этап 2: Анализ поста {post_id}")
                 filter_score = filter_result.data.get("score", 0) if filter_result else 0
+                # Debug: Логируем начало анализа
+                self._log_debug_step("analysis_start", "info", {
+                    "message": f"Этап 2: Анализ поста {post_id}",
+                    "stage": "analysis",
+                    "post_id": post_id,
+                    "filter_score": filter_score
+                })
 
                 # Debug: Логируем промпты анализа
                 analysis_system_prompt = prompt_manager.get_system_prompt("analyze_success_system", {
@@ -277,6 +301,13 @@ class LLMOrchestrator:
             rubric_result = None
             if not skip_rubric_selection:
                 logger.info(f"Этап 3: Выбор рубрик/форматов для поста {post_id}")
+                # Debug: Логируем начало выбора рубрик
+                self._log_debug_step("rubric_selection_start", "info", {
+                    "message": f"Этап 3: Выбор рубрик/форматов для поста {post_id}",
+                    "stage": "rubric_selection",
+                    "post_id": post_id,
+                    "analysis_data": analysis_result.data if analysis_result and analysis_result.success else {}
+                })
                 analysis_data = analysis_result.data if analysis_result and analysis_result.success else {}
 
                 # Получаем доступные рубрики и форматы
@@ -358,6 +389,14 @@ class LLMOrchestrator:
             # Этап 4: Генерация сценариев (если не пропускается)
             if not skip_rubric_selection:
                 logger.info(f"Этап 4: Генерация сценариев для поста {post_id}")
+                # Debug: Логируем начало генерации
+                self._log_debug_step("generation_start", "info", {
+                    "message": f"Этап 4: Генерация сценариев для поста {post_id}",
+                    "stage": "generation",
+                    "post_id": post_id,
+                    "rubric_result": rubric_result.success if rubric_result else False,
+                    "combinations_count": len(rubric_result.data.get("combinations", []) if rubric_result else [])
+                })
                 logger.info(f"Rubric result: {rubric_result.success if rubric_result else 'None'}")
                 logger.info(f"Rubric data: {rubric_result.data if rubric_result else 'None'}")
                 scenarios = []
@@ -431,11 +470,43 @@ class LLMOrchestrator:
                         else:
                             rubric_name = rubric_info.get('name', 'Не указана')
 
+                        # Получаем полную информацию из rubric_selection
+                        rubric_selection_data = rubric_result.data if rubric_result and rubric_result.success else {}
+
+                        # Получаем информацию о выбранной рубрике и формате из БД
+                        selected_rubric_info = {}
+                        selected_format_info = {}
+
+                        # Ищем информацию о рубрике в доступных рубриках
+                        for rubric in available_rubrics:
+                            if isinstance(rubric_data, dict) and rubric.get('name') == rubric_data.get('name'):
+                                selected_rubric_info = rubric
+                                break
+                            elif isinstance(rubric_data, str) and rubric.get('name') == rubric_data:
+                                selected_rubric_info = rubric
+                                break
+
+                        # Ищем информацию о формате в доступных форматах
+                        for fmt in available_formats:
+                            if isinstance(format_data, dict) and fmt.get('name') == format_data.get('name'):
+                                selected_format_info = fmt
+                                break
+                            elif isinstance(format_data, str) and fmt.get('name') == format_data:
+                                selected_format_info = fmt
+                                break
+
                         generator_user_prompt = prompt_manager.get_user_prompt("generate_scenario_system", {
                             "post_text": post_data.get("text", ""),
                             "post_analysis": str(analysis_result.data if analysis_result and analysis_result.success else {}),
+                            "rubric_selection_analysis": str(rubric_selection_data),
                             "rubric_name": rubric_name,
+                            "rubric_description": selected_rubric_info.get('description', ''),
+                            "rubric_examples": selected_rubric_info.get('examples', ''),
                             "format_name": format_name,
+                            "format_description": selected_format_info.get('description', ''),
+                            "format_duration": selected_format_info.get('duration_seconds') or selected_format_info.get('duration', duration),
+                            "combination_justification": combination.get('justification', ''),
+                            "combination_content_idea": combination.get('content_idea', ''),
                             "duration": duration
                         })
 
@@ -551,6 +622,16 @@ class LLMOrchestrator:
 
         except Exception as e:
             logger.error(f"Критическая ошибка в enhanced оркестраторе для поста {post_id}: {e}", exc_info=True)
+            # Debug: Логируем критическую ошибку
+            self._log_debug_step("critical_error", "error", {
+                "error": str(e),
+                "stage": "orchestrator",
+                "post_id": post_id,
+                "error_type": type(e).__name__,
+                "details": {
+                    "traceback": str(e.__traceback__) if e.__traceback__ else None
+                }
+            })
 
             return OrchestratorResult(
                 post_id=post_id,

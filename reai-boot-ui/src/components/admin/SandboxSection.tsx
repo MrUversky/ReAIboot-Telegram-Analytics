@@ -823,9 +823,9 @@ export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
                       <SelectContent>
                         <SelectItem value="all">Все типы</SelectItem>
                         <SelectItem value="info">Информация</SelectItem>
+                        <SelectItem value="error">Ошибки</SelectItem>
                         <SelectItem value="llm_response">LLM ответ</SelectItem>
                         <SelectItem value="prompts">Промпты</SelectItem>
-                        <SelectItem value="error">Ошибки</SelectItem>
                         <SelectItem value="db_operation">База данных</SelectItem>
                       </SelectContent>
                     </Select>
@@ -914,6 +914,35 @@ export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
                                 </div>
                               </div>
                             ) : log.step_type === 'db_operation' ? (
+                            ) : log.step_type === 'info' ? (
+                              <div className="space-y-2">
+                                <div className="font-medium text-blue-700">ℹ️ Информация:</div>
+                                <div className="bg-blue-50 border border-blue-200 p-2 rounded text-xs">
+                                  <div className="font-medium">Сообщение:</div>
+                                  <div className="font-mono whitespace-pre-wrap mt-1">
+                                    {log.data?.message || 'Нет сообщения'}
+                                  </div>
+                                  {log.data?.stage && (
+                                    <div className="mt-1">
+                                      <strong>Этап:</strong> {log.data.stage}
+                                    </div>
+                                  )}
+                                  {log.data?.post_id && (
+                                    <div className="mt-1">
+                                      <strong>Пост:</strong> {log.data.post_id}
+                                    </div>
+                                  )}
+                                  {log.data?.details && (
+                                    <div className="mt-2">
+                                      <div className="font-medium">Детали:</div>
+                                      <div className="font-mono whitespace-pre-wrap mt-1 text-xs max-h-32 overflow-y-auto">
+                                        {JSON.stringify(log.data.details, null, 2)}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ) : log.step_type === 'db_operation' ? (
                               <div className="space-y-2">
                                 <div className="font-medium text-green-700">💾 Операция с БД:</div>
                                 <div className="bg-green-50 border border-green-200 p-2 rounded text-xs">
@@ -929,10 +958,25 @@ export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
                                   )}
                                   <div className="mt-2">
                                     <div className="font-medium">Данные:</div>
-                                    <div className="font-mono whitespace-pre-wrap mt-1 text-xs max-h-32 overflow-y-auto">
+                                    <div className="font-mono whitespace-pre-wrap mt-1 text-xs max-h-48 overflow-y-auto border bg-white p-2 rounded">
                                       {JSON.stringify(log.data.data || log.data, null, 2)}
                                     </div>
                                   </div>
+                                  {log.data?.tokens_used && (
+                                    <div className="mt-1">
+                                      <strong>Токенов:</strong> {log.data.tokens_used}
+                                    </div>
+                                  )}
+                                  {log.data?.processing_time && (
+                                    <div className="mt-1">
+                                      <strong>Время:</strong> {log.data.processing_time.toFixed(3)}s
+                                    </div>
+                                  )}
+                                  {log.data?.cost_usd && (
+                                    <div className="mt-1">
+                                      <strong>Стоимость:</strong> ${log.data.cost_usd.toFixed(4)}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             ) : (
