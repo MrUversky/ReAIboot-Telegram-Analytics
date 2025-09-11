@@ -2626,14 +2626,62 @@ async def test_pipeline_sandbox(request: Dict[str, Any]):
         session_id = f"sandbox_{post_data.get('message_id', 'unknown')}_{int(asyncio.get_event_loop().time())}"
         orchestrator.enable_debug_mode(session_id)
 
+        # Проверяем режим выполнения
+        step_by_step = options.get("step_by_step", False)
+        current_step = options.get("current_step", 0)
+        previous_results = options.get("previous_results", [])
+
         try:
-            # Запускаем pipeline с тем же методом, что и на продакшене
-            result = await orchestrator.process_post_enhanced(
-                post_data=post_data,
-                skip_filter=False,  # Всегда выполняем фильтрацию
-                skip_analysis=False,  # Всегда выполняем анализ
-                skip_rubric_selection=False  # Всегда выполняем выбор рубрик
-            )
+            if step_by_step:
+                # Пошаговое выполнение
+                logger.info(f"🧪 Пошаговое выполнение: шаг {current_step + 1}")
+
+                # Определяем, какие шаги выполнять на основе текущего шага
+                if current_step == 0:
+                    # Шаг 1: Только фильтрация
+                    logger.info("🧪 Шаг 1: Выполняем только фильтрацию")
+                    result = await orchestrator.process_post_enhanced(
+                        post_data=post_data,
+                        skip_filter=False,  # Выполняем фильтрацию
+                        skip_analysis=True,  # Пропускаем анализ
+                        skip_rubric_selection=True  # Пропускаем выбор рубрик
+                    )
+                elif current_step == 1:
+                    # Шаг 2: Только анализ (предполагаем, что фильтрация прошла)
+                    logger.info("🧪 Шаг 2: Выполняем только анализ")
+                    result = await orchestrator.process_post_enhanced(
+                        post_data=post_data,
+                        skip_filter=True,  # Пропускаем фильтрацию
+                        skip_analysis=False,  # Выполняем анализ
+                        skip_rubric_selection=True  # Пропускаем выбор рубрик
+                    )
+                elif current_step == 2:
+                    # Шаг 3: Только выбор рубрик (предполагаем, что предыдущие шаги прошли)
+                    logger.info("🧪 Шаг 3: Выполняем только выбор рубрик")
+                    result = await orchestrator.process_post_enhanced(
+                        post_data=post_data,
+                        skip_filter=True,  # Пропускаем фильтрацию
+                        skip_analysis=True,  # Пропускаем анализ
+                        skip_rubric_selection=False  # Выполняем выбор рубрик
+                    )
+                else:
+                    # Все шаги выполнены
+                    logger.info("🧪 Все шаги выполнены")
+                    result = await orchestrator.process_post_enhanced(
+                        post_data=post_data,
+                        skip_filter=True,  # Все шаги выполнены
+                        skip_analysis=True,
+                        skip_rubric_selection=True
+                    )
+            else:
+                # Полный pipeline
+                logger.info("🧪 Полное выполнение pipeline")
+                result = await orchestrator.process_post_enhanced(
+                    post_data=post_data,
+                    skip_filter=False,  # Всегда выполняем фильтрацию
+                    skip_analysis=False,  # Всегда выполняем анализ
+                    skip_rubric_selection=False  # Всегда выполняем выбор рубрик
+                )
 
             # Получаем детальный debug лог
             debug_log = orchestrator.get_debug_log()
@@ -2697,22 +2745,28 @@ async def get_sandbox_posts(limit: int = 50, offset: int = 0):
         # Получаем посты из базы данных
         posts_result = supabase_manager.client.table('posts').select(
             'id', 'message_id', 'channel_username', 'channel_title',
-            'views', 'forwards', 'reactions', 'created_at'
-        ).order('created_at', desc=True).range(offset, offset + limit - 1).execute()
+            'text_preview', 'full_text', 'views', 'forwards', 'reactions', 'date', 'created_at'
+        ).order('date', desc=True).range(offset, offset + limit - 1).execute()
 
         posts = []
         for post in posts_result.data:
+            # Получаем реальный текст поста
+            post_text = post.get('full_text', '') or post.get('text_preview', '')
+            if not post_text:
+                post_text = f'Post {post.get("message_id", "")} from {post.get("channel_username", "")}'
+
             # Форматируем данные для песочницы
             formatted_post = {
                 'id': post.get('id'),
                 'message_id': post.get('message_id'),
                 'channel_username': post.get('channel_username', ''),
                 'channel_title': post.get('channel_title', ''),
-                'text': f'Post {post.get("message_id", "")} from {post.get("channel_username", "")}',
+                'text': post_text,
                 'views': post.get('views', 0),
                 'forwards': post.get('forwards', 0),
                 'reactions': post.get('reactions', 0),
-                'created_at': post.get('created_at')
+                'created_at': post.get('created_at'),
+                'date': post.get('date')  # Дата поста для совместимости с интерфейсом Post
             }
             posts.append(formatted_post)
 
@@ -2747,7 +2801,7 @@ async def get_sandbox_post(post_id: str):
         # Получаем пост из базы данных
         post_result = supabase_manager.client.table('posts').select(
             'id', 'message_id', 'channel_username', 'channel_title',
-            'views', 'forwards', 'reactions', 'created_at'
+            'text_preview', 'full_text', 'views', 'forwards', 'reactions', 'date', 'created_at'
         ).eq('message_id', message_id).eq('channel_username', channel_username).execute()
 
         if not post_result.data:
@@ -2755,16 +2809,22 @@ async def get_sandbox_post(post_id: str):
 
         post = post_result.data[0]
 
+        # Получаем реальный текст поста
+        post_text = post.get('full_text', '') or post.get('text_preview', '')
+        if not post_text:
+            post_text = f'Post {post.get("message_id", "")} from {post.get("channel_username", "")}'
+
         # Форматируем данные для песочницы
         formatted_post = {
             'id': post.get('id'),
             'message_id': post.get('message_id'),
             'channel_username': post.get('channel_username', ''),
             'channel_title': post.get('channel_title', ''),
-            'text': f'Post {post.get("message_id", "")} from {post.get("channel_username", "")}',
+            'text': post_text,
             'views': post.get('views', 0),
             'forwards': post.get('forwards', 0),
             'reactions': post.get('reactions', 0),
+            'date': post.get('date'),
             'created_at': post.get('created_at')
         }
 

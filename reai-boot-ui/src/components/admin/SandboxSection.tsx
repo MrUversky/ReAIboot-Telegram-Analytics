@@ -37,6 +37,9 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
   const [loadingPosts, setLoadingPosts] = useState(false)
   const [selectedPostId, setSelectedPostId] = useState<string>('')
 
+  // Error state
+  const [jsonError, setJsonError] = useState<string>('')
+
   const validatePostData = (jsonString: string) => {
     if (!jsonString.trim()) {
       return { isValid: false, error: 'Введите данные поста в формате JSON' }
@@ -81,7 +84,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
 
     setLoading(true)
     try {
-      const response = await fetch('http://localhost:8000/api/sandbox/test-pipeline', {
+      const response = await fetch('/api/sandbox/test-pipeline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -104,6 +107,21 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
       alert('Ошибка при тестировании песочницы')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Обновленная функция handleTest с поддержкой режимов
+  const handleTestNew = async () => {
+    if (stepByStepMode) {
+      // Пошаговый режим - начинаем выполнение
+      if (currentStep === 0 && stepResults.length === 0) {
+        await startStepByStepExecution()
+      } else {
+        await executeCurrentStep()
+      }
+    } else {
+      // Полный режим
+      await handleTestSandbox()
     }
   }
 
@@ -200,7 +218,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
   const loadAvailablePosts = async () => {
     setLoadingPosts(true)
     try {
-      const response = await fetch('http://localhost:8000/api/sandbox/posts?limit=100')
+      const response = await fetch('/api/sandbox/posts?limit=100')
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
@@ -222,7 +240,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
     }
 
     try {
-      const response = await fetch(`http://localhost:8000/api/sandbox/post/${postId}`)
+      const response = await fetch(`/api/sandbox/post/${postId}`)
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
@@ -238,7 +256,8 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
         text: post.text,
         views: post.views,
         forwards: post.forwards,
-        reactions: post.reactions
+        reactions: post.reactions,
+        date: post.date
       }, null, 2))
 
     } catch (error) {
@@ -256,6 +275,127 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
   React.useEffect(() => {
     loadSelectedPost(selectedPostId)
   }, [selectedPostId])
+
+  // Функция полного тестирования pipeline
+  const handleTestSandbox = async () => {
+    // Валидируем данные
+    const validation = validatePostData(postData)
+
+    if (!validation.isValid) {
+      setJsonError(validation.error || 'Неизвестная ошибка валидации')
+      return
+    }
+
+    setJsonError('') // Сбрасываем ошибку
+    setLoading(true)
+
+    try {
+      const response = await fetch('/api/sandbox/test-pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          post_data: validation.data,
+          options: {
+            debug_mode: true,
+            step_by_step: false
+          }
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+
+      setResult(result)
+      // Сбросить фильтры при новом результате
+      setLogSearchTerm('')
+      setLogFilterType('all')
+      setLogFilterSuccess('all')
+    } catch (error) {
+      console.error('Error testing sandbox:', error)
+      setJsonError('Ошибка при тестировании песочницы: ' + (error instanceof Error ? error.message : String(error)))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Функции пошагового выполнения
+  const startStepByStepExecution = async () => {
+    const validation = validatePostData(postData)
+    if (!validation.isValid) {
+      setJsonError(validation.error || 'Неизвестная ошибка валидации')
+      return
+    }
+
+    setJsonError('')
+    setStepByStepMode(true)
+    setCurrentStep(0)
+    setStepResults([])
+    setCanExecuteNext(true)
+
+    // Автоматически запускаем первый шаг
+    await executeCurrentStep()
+  }
+
+  const executeCurrentStep = async () => {
+    if (!canExecuteNext) return
+
+    setLoading(true)
+    try {
+      const validation = validatePostData(postData)
+      const stepData = {
+        post_data: validation.data,
+        options: {
+          debug_mode: true,
+          step_by_step: true,
+          current_step: currentStep,
+          previous_results: stepResults
+        }
+      }
+
+      console.log('Отправляем на шаг:', currentStep + 1, stepData)
+
+      const response = await fetch('/api/sandbox/test-pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stepData)
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+
+      // Добавляем результат текущего шага
+      const newStepResults = [...stepResults]
+      newStepResults[currentStep] = result
+      setStepResults(newStepResults)
+
+      // Переходим к следующему шагу
+      setCurrentStep(currentStep + 1)
+
+      // Проверяем, можем ли выполнить следующий шаг
+      setCanExecuteNext(result.success || currentStep < 2) // Можно продолжать даже при неудаче фильтрации
+
+    } catch (error) {
+      console.error('Error executing step:', error)
+      setJsonError('Ошибка выполнения шага: ' + (error instanceof Error ? error.message : String(error)))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const resetStepByStepExecution = () => {
+    setStepByStepMode(false)
+    setCurrentStep(0)
+    setStepResults([])
+    setCanExecuteNext(false)
+    setResult(null)
+    setJsonError('')
+  }
 
   return (
     <Card>
@@ -303,17 +443,39 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
           </Label>
           <div className="flex gap-2 mb-4">
             <Select value={selectedPostId} onValueChange={setSelectedPostId}>
-              <SelectTrigger className="flex-1">
+              <SelectTrigger className="flex-1 min-w-[400px]">
                 <SelectValue placeholder={loadingPosts ? "Загрузка постов..." : "Выберите пост из базы данных"} />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="max-w-[600px]">
                 <SelectItem value="">Очистить выбор</SelectItem>
-                {availablePosts.map((post: any) => (
-                  <SelectItem key={post.id} value={post.id}>
-                    {post.channel_username} - {post.text.substring(0, 50)}...
-                    ({post.views} просмотров)
-                  </SelectItem>
-                ))}
+                {availablePosts.map((post: any) => {
+                  const postDate = new Date(post.date || post.created_at).toLocaleDateString('ru-RU', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  });
+                  const cleanText = post.text.replace(/^Post \d+ from @\w+/, '').trim();
+                  const shortText = cleanText.length > 60 ? cleanText.substring(0, 60) + '...' : cleanText;
+                  const displayText = cleanText ? shortText : '📝 Пост без текста';
+
+                  return (
+                    <SelectItem key={post.id} value={post.id} className="py-3">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{post.channel_title || post.channel_username}</span>
+                          <span className="text-xs text-gray-500">#{post.message_id}</span>
+                        </div>
+                        <div className="text-xs text-gray-600 leading-tight">{displayText}</div>
+                        <div className="flex items-center gap-3 text-xs text-gray-500">
+                          <span>👁 {post.views?.toLocaleString() || 0}</span>
+                          <span>📅 {postDate}</span>
+                          <span>❤️ {post.reactions || 0}</span>
+                        </div>
+                      </div>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
             <Button
@@ -350,18 +512,37 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
 
         {/* Action Buttons */}
         <div className="flex gap-4">
-          <Button onClick={handleTest} disabled={loading || !postData.trim()} className="flex-1">
+          <Button onClick={handleTestNew} disabled={loading || !postData.trim() || (stepByStepMode && !canExecuteNext && currentStep > 0)} className="flex-1">
             {loading ? (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
             ) : (
               <FlaskRound className="w-4 h-4 mr-2" />
             )}
-            {loading ? 'Тестируем...' : 'Запустить тест'}
+            {loading ? 'Тестируем...' :
+             stepByStepMode ?
+               (currentStep === 0 && stepResults.length === 0 ? 'Начать пошаговое выполнение' :
+                currentStep < 3 ? `Выполнить шаг ${currentStep + 1}` : 'Завершить') :
+               'Запустить полный тест'}
           </Button>
           <Button variant="outline" onClick={() => setPostData('')}>
             Очистить
           </Button>
+          {stepByStepMode && (
+            <Button variant="destructive" onClick={resetStepByStepExecution} size="sm">
+              Сбросить шаги
+            </Button>
+          )}
         </div>
+
+        {/* Error Display */}
+        {jsonError && (
+          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-start gap-2">
+              <div className="text-red-600 text-sm font-medium">❌ Ошибка:</div>
+              <div className="text-red-700 text-sm">{jsonError}</div>
+            </div>
+          </div>
+        )}
 
         {/* Results Display */}
         {result && (

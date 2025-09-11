@@ -61,85 +61,6 @@ interface SystemStats {
   total_tokens: number
 }
 
-// JSON Highlighter компонент
-const JsonHighlighter = ({ data }: { data: any }) => {
-  const highlightJson = (obj: any, indent = 0): JSX.Element => {
-    const indentStr = '  '.repeat(indent)
-
-    if (obj === null) {
-      return <span className="text-blue-600">null</span>
-    }
-
-    if (typeof obj === 'boolean') {
-      return <span className="text-purple-600">{obj.toString()}</span>
-    }
-
-    if (typeof obj === 'number') {
-      return <span className="text-green-600">{obj}</span>
-    }
-
-    if (typeof obj === 'string') {
-      return <span className="text-red-600">"{obj}"</span>
-    }
-
-    if (Array.isArray(obj)) {
-      if (obj.length === 0) {
-        return <span className="text-gray-600">[]</span>
-      }
-
-      return (
-        <span>
-          [<br />
-          {obj.map((item, index) => (
-            <span key={index}>
-              {indentStr}  {highlightJson(item, indent + 1)}
-              {index < obj.length - 1 ? ',' : ''}
-              <br />
-            </span>
-          ))}
-          {indentStr}]
-        </span>
-      )
-    }
-
-    if (typeof obj === 'object') {
-      const keys = Object.keys(obj)
-      if (keys.length === 0) {
-        return <span className="text-gray-600">{'{}'}</span>
-      }
-
-      return (
-        <span>
-          {'{'}<br />
-          {keys.map((key, index) => (
-            <span key={key}>
-              {indentStr}  <span className="text-blue-800">"{key}"</span>: {highlightJson(obj[key], indent + 1)}
-              {index < keys.length - 1 ? ',' : ''}
-              <br />
-            </span>
-          ))}
-          {indentStr}{'}'}
-        </span>
-      )
-    }
-
-    return <span className="text-gray-600">{String(obj)}</span>
-  }
-
-  try {
-    return (
-      <div className="font-mono text-xs overflow-x-auto">
-        {highlightJson(data)}
-      </div>
-    )
-  } catch (error) {
-    return (
-      <div className="text-red-600 text-xs">
-        Ошибка отображения JSON: {String(error)}
-      </div>
-    )
-  }
-}
 
 export default function AdminPage() {
   const router = useRouter()
@@ -169,21 +90,8 @@ export default function AdminPage() {
   const [telegramStatus, setTelegramStatus] = useState<any>(null)
   const [showTelegramModal, setShowTelegramModal] = useState(false)
 
-  // Sandbox state
+  // Sandbox modal state (только для открытия модального окна)
   const [showSandboxModal, setShowSandboxModal] = useState(false)
-  const [sandboxPostData, setSandboxPostData] = useState('')
-  const [sandboxResult, setSandboxResult] = useState<any>(null)
-  const [sandboxLoading, setSandboxLoading] = useState(false)
-  const [logSearchTerm, setLogSearchTerm] = useState('')
-  const [logFilterType, setLogFilterType] = useState<string>('all')
-  const [logFilterSuccess, setLogFilterSuccess] = useState<string>('all')
-  const [jsonError, setJsonError] = useState<string>('')
-
-  // Step-by-step execution state
-  const [stepByStepMode, setStepByStepMode] = useState(false)
-  const [currentStep, setCurrentStep] = useState(0)
-  const [stepResults, setStepResults] = useState<any[]>([])
-  const [canExecuteNext, setCanExecuteNext] = useState(false)
 
   // LLM Prices state
   const [showPricesModal, setShowPricesModal] = useState(false)
@@ -641,202 +549,9 @@ export default function AdminPage() {
     }
   }
 
-  const handleTestSandbox = async () => {
-    // Валидируем данные
-    const validation = validatePostData(sandboxPostData)
 
-    if (!validation.isValid) {
-      setJsonError(validation.error)
-      return
-    }
 
-    setJsonError('') // Сбрасываем ошибку
-    setSandboxLoading(true)
 
-    try {
-      const response = await fetch('/api/sandbox/test-pipeline', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          post_data: validation.data,
-          options: {
-            debug_mode: true,
-            step_by_step: false
-          }
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const result = await response.json()
-
-      setSandboxResult(result)
-      // Сбросить фильтры при новом результате
-      setLogSearchTerm('')
-      setLogFilterType('all')
-      setLogFilterSuccess('all')
-    } catch (error) {
-      console.error('Error testing sandbox:', error)
-      setJsonError('Ошибка при тестировании песочницы: ' + error.message)
-    } finally {
-      setSandboxLoading(false)
-    }
-  }
-
-  // Функция фильтрации логов
-  const getFilteredLogs = () => {
-    if (!sandboxResult?.debug_log) return []
-
-    let filtered = sandboxResult.debug_log
-
-    // Фильтр по типу
-    if (logFilterType !== 'all') {
-      filtered = filtered.filter((log: any) => log.step_type === logFilterType)
-    }
-
-    // Фильтр по успешности (для шагов)
-    if (logFilterSuccess !== 'all') {
-      const successValue = logFilterSuccess === 'success'
-      filtered = filtered.filter((log: any) => {
-        const data = log.data || {}
-        if (log.step_type === 'llm_response') {
-          return data.success === successValue
-        }
-        return true // Для других типов не фильтруем по успеху
-      })
-    }
-
-    // Поиск по тексту
-    if (logSearchTerm.trim()) {
-      const searchLower = logSearchTerm.toLowerCase()
-      filtered = filtered.filter((log: any) => {
-        const stepName = log.step_name?.toLowerCase() || ''
-        const stepType = log.step_type?.toLowerCase() || ''
-        const dataStr = JSON.stringify(log.data || {}).toLowerCase()
-        return stepName.includes(searchLower) ||
-               stepType.includes(searchLower) ||
-               dataStr.includes(searchLower)
-      })
-    }
-
-    return filtered
-  }
-
-  // Функция экспорта результатов в JSON
-  const handleExportResults = () => {
-    if (!sandboxResult) return
-
-    let postData
-    try {
-      postData = JSON.parse(sandboxPostData || '{}')
-    } catch (error) {
-      postData = { error: 'Invalid JSON in input', raw_text: sandboxPostData }
-    }
-
-    const exportData = {
-      timestamp: new Date().toISOString(),
-      sandbox_version: "1.0",
-      input_data: {
-        post_data: postData,
-        options: {
-          debug_mode: true,
-          step_by_step: stepByStepMode
-        }
-      },
-      results: sandboxResult,
-      filters_applied: {
-        search_term: logSearchTerm,
-        filter_type: logFilterType,
-        filter_success: logFilterSuccess
-      },
-      filtered_logs_count: getFilteredLogs().length,
-      total_logs_count: sandboxResult.debug_log?.length || 0
-    }
-
-    const dataStr = JSON.stringify(exportData, null, 2)
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
-
-    const exportFileDefaultName = `sandbox-results-${sandboxResult.post_id}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`
-
-    const linkElement = document.createElement('a')
-    linkElement.setAttribute('href', dataUri)
-    linkElement.setAttribute('download', exportFileDefaultName)
-    linkElement.click()
-  }
-
-  // Функции пошагового выполнения
-  const startStepByStepExecution = () => {
-    const validation = validatePostData(sandboxPostData)
-    if (!validation.isValid) {
-      setJsonError(validation.error)
-      return
-    }
-
-    setJsonError('')
-    setStepByStepMode(true)
-    setCurrentStep(0)
-    setStepResults([])
-    setCanExecuteNext(true)
-  }
-
-  const executeCurrentStep = async () => {
-    if (!canExecuteNext) return
-
-    setSandboxLoading(true)
-    try {
-      const validation = validatePostData(sandboxPostData)
-      const stepData = {
-        post_data: validation.data,
-        options: {
-          debug_mode: true,
-          step_by_step: true,
-          current_step: currentStep,
-          previous_results: stepResults
-        }
-      }
-
-      const response = await fetch('/api/sandbox/test-pipeline', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(stepData)
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const result = await response.json()
-
-      // Добавляем результат текущего шага
-      const newStepResults = [...stepResults]
-      newStepResults[currentStep] = result
-      setStepResults(newStepResults)
-
-      // Переходим к следующему шагу
-      setCurrentStep(currentStep + 1)
-
-      // Проверяем, можем ли выполнить следующий шаг
-      setCanExecuteNext(result.success || currentStep < 2) // Можно продолжать даже при неудаче фильтрации
-
-    } catch (error) {
-      console.error('Error executing step:', error)
-      setJsonError('Ошибка выполнения шага: ' + error.message)
-    } finally {
-      setSandboxLoading(false)
-    }
-  }
-
-  const resetStepByStepExecution = () => {
-    setStepByStepMode(false)
-    setCurrentStep(0)
-    setStepResults([])
-    setCanExecuteNext(false)
-    setSandboxResult(null)
-  }
 
   const handleConfigureViral = async () => {
     await loadViralSettings()
@@ -3240,16 +2955,7 @@ export default function AdminPage() {
               </div>
 
               <div className="space-y-6">
-                
-                <SandboxSection />
-                    
-
-                    
-
-                    
-
-                    
-
+                  <SandboxSection />
               </div>
             </div>
           </div>
