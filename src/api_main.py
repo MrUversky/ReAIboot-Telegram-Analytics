@@ -2684,6 +2684,98 @@ async def test_pipeline_sandbox(request: Dict[str, Any]):
         logger.error(f"Ошибка в песочнице: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка тестирования: {str(e)}")
 
+
+@app.get("/api/sandbox/posts", tags=["sandbox"])
+async def get_sandbox_posts(limit: int = 50, offset: int = 0):
+    """
+    Получить список постов для тестирования в песочнице.
+
+    - **limit**: Максимальное количество постов (по умолчанию 50)
+    - **offset**: Смещение для пагинации (по умолчанию 0)
+    """
+    try:
+        # Получаем посты из базы данных
+        posts_result = supabase_manager.client.table('posts').select(
+            'id', 'message_id', 'channel_username', 'channel_title',
+            'views', 'forwards', 'reactions', 'created_at'
+        ).order('created_at', desc=True).range(offset, offset + limit - 1).execute()
+
+        posts = []
+        for post in posts_result.data:
+            # Форматируем данные для песочницы
+            formatted_post = {
+                'id': post.get('id'),
+                'message_id': post.get('message_id'),
+                'channel_username': post.get('channel_username', ''),
+                'channel_title': post.get('channel_title', ''),
+                'text': f'Post {post.get("message_id", "")} from {post.get("channel_username", "")}',
+                'views': post.get('views', 0),
+                'forwards': post.get('forwards', 0),
+                'reactions': post.get('reactions', 0),
+                'created_at': post.get('created_at')
+            }
+            posts.append(formatted_post)
+
+        return {
+            "posts": posts,
+            "total": len(posts),
+            "limit": limit,
+            "offset": offset
+        }
+
+    except Exception as e:
+        logger.error(f"Ошибка получения постов для песочницы: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения постов: {str(e)}")
+
+
+@app.get("/api/sandbox/post/{post_id}", tags=["sandbox"])
+async def get_sandbox_post(post_id: str):
+    """
+    Получить конкретный пост для тестирования в песочнице.
+
+    - **post_id**: ID поста в формате message_id_channel_username
+    """
+    try:
+        # Разбираем post_id
+        if '_' not in post_id:
+            raise HTTPException(status_code=400, detail="Некорректный формат post_id")
+
+        parts = post_id.split('_', 1)
+        message_id = int(parts[0])
+        channel_username = parts[1]
+
+        # Получаем пост из базы данных
+        post_result = supabase_manager.client.table('posts').select(
+            'id', 'message_id', 'channel_username', 'channel_title',
+            'views', 'forwards', 'reactions', 'created_at'
+        ).eq('message_id', message_id).eq('channel_username', channel_username).execute()
+
+        if not post_result.data:
+            raise HTTPException(status_code=404, detail="Пост не найден")
+
+        post = post_result.data[0]
+
+        # Форматируем данные для песочницы
+        formatted_post = {
+            'id': post.get('id'),
+            'message_id': post.get('message_id'),
+            'channel_username': post.get('channel_username', ''),
+            'channel_title': post.get('channel_title', ''),
+            'text': f'Post {post.get("message_id", "")} from {post.get("channel_username", "")}',
+            'views': post.get('views', 0),
+            'forwards': post.get('forwards', 0),
+            'reactions': post.get('reactions', 0),
+            'created_at': post.get('created_at')
+        }
+
+        return {"post": formatted_post}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка получения поста для песочницы: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения поста: {str(e)}")
+
 # Обработчик ошибок
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

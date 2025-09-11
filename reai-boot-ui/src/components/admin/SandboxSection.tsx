@@ -32,6 +32,11 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
   const [logFilterType, setLogFilterType] = useState<string>('all')
   const [logFilterSuccess, setLogFilterSuccess] = useState<string>('all')
 
+  // Posts loading state
+  const [availablePosts, setAvailablePosts] = useState<any[]>([])
+  const [loadingPosts, setLoadingPosts] = useState(false)
+  const [selectedPostId, setSelectedPostId] = useState<string>('')
+
   const validatePostData = (jsonString: string) => {
     if (!jsonString.trim()) {
       return { isValid: false, error: 'Введите данные поста в формате JSON' }
@@ -191,6 +196,67 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
     }
   }
 
+  // Функция загрузки списка постов
+  const loadAvailablePosts = async () => {
+    setLoadingPosts(true)
+    try {
+      const response = await fetch('/api/sandbox/posts?limit=100')
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      const data = await response.json()
+      setAvailablePosts(data.posts || [])
+    } catch (error) {
+      console.error('Error loading posts:', error)
+      alert('Ошибка загрузки постов')
+    } finally {
+      setLoadingPosts(false)
+    }
+  }
+
+  // Функция загрузки выбранного поста
+  const loadSelectedPost = async (postId: string) => {
+    if (!postId) {
+      setPostData('')
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/sandbox/post/${postId}`)
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      const data = await response.json()
+      const post = data.post
+
+      // Предзаполняем форму данными поста
+      setPostData(JSON.stringify({
+        id: post.id,
+        message_id: post.message_id,
+        channel_username: post.channel_username,
+        channel_title: post.channel_title,
+        text: post.text,
+        views: post.views,
+        forwards: post.forwards,
+        reactions: post.reactions
+      }, null, 2))
+
+    } catch (error) {
+      console.error('Error loading post:', error)
+      alert('Ошибка загрузки поста')
+    }
+  }
+
+  // Загружаем посты при монтировании компонента
+  React.useEffect(() => {
+    loadAvailablePosts()
+  }, [])
+
+  // Загружаем выбранный пост при изменении selectedPostId
+  React.useEffect(() => {
+    loadSelectedPost(selectedPostId)
+  }, [selectedPostId])
+
   return (
     <Card>
       <CardHeader>
@@ -230,10 +296,40 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
           </div>
         </div>
 
+        {/* Post Selection */}
+        <div>
+          <Label className="text-sm font-medium mb-2 block">
+            Выбрать существующий пост
+          </Label>
+          <div className="flex gap-2 mb-4">
+            <Select value={selectedPostId} onValueChange={setSelectedPostId}>
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder={loadingPosts ? "Загрузка постов..." : "Выберите пост из базы данных"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Очистить выбор</SelectItem>
+                {availablePosts.map((post: any) => (
+                  <SelectItem key={post.id} value={post.id}>
+                    {post.channel_username} - {post.text.substring(0, 50)}...
+                    ({post.views} просмотров)
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              onClick={loadAvailablePosts}
+              disabled={loadingPosts}
+            >
+              {loadingPosts ? '...' : '🔄'}
+            </Button>
+          </div>
+        </div>
+
         {/* Post Data Input */}
         <div>
           <Label className="text-sm font-medium mb-2 block">
-            Данные поста (JSON)
+            Данные поста (JSON) {selectedPostId && <span className="text-green-600">- загружено из БД</span>}
           </Label>
           <Textarea
             placeholder={`Пример:
