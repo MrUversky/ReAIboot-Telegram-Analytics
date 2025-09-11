@@ -30,7 +30,8 @@ import {
   Target,
   BarChart3,
   DollarSign,
-  AlertCircle
+  AlertCircle,
+  FlaskRound
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { apiClient } from '@/lib/api'
@@ -81,6 +82,12 @@ export default function AdminPage() {
   // Telegram Auth state
   const [telegramStatus, setTelegramStatus] = useState<any>(null)
   const [showTelegramModal, setShowTelegramModal] = useState(false)
+
+  // Sandbox state
+  const [showSandboxModal, setShowSandboxModal] = useState(false)
+  const [sandboxPostData, setSandboxPostData] = useState('')
+  const [sandboxResult, setSandboxResult] = useState<any>(null)
+  const [sandboxLoading, setSandboxLoading] = useState(false)
 
   // LLM Prices state
   const [showPricesModal, setShowPricesModal] = useState(false)
@@ -483,6 +490,46 @@ export default function AdminPage() {
       setLoadingPrices(false)
     }
     setShowPricesModal(true)
+  }
+
+  const handleTestSandbox = async () => {
+    if (!sandboxPostData.trim()) {
+      alert('Введите данные поста для тестирования')
+      return
+    }
+
+    setSandboxLoading(true)
+    try {
+      // Парсим JSON данные поста
+      const postData = JSON.parse(sandboxPostData)
+
+      const response = await fetch('/api/sandbox/test-pipeline', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          post_data: postData,
+          options: {
+            debug_mode: true,
+            step_by_step: false
+          }
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+
+      setSandboxResult(result)
+    } catch (error) {
+      console.error('Error testing sandbox:', error)
+      alert('Ошибка при тестировании песочницы')
+    } finally {
+      setSandboxLoading(false)
+    }
   }
 
   const handleConfigureViral = async () => {
@@ -1081,6 +1128,10 @@ export default function AdminPage() {
               <Button variant="outline" onClick={() => setShowCleanupModal(true)}>
                 <Trash2 className="w-4 h-4 mr-2" />
                 Очистка данных
+              </Button>
+              <Button variant="outline" onClick={() => setShowSandboxModal(true)}>
+                <FlaskRound className="w-4 h-4 mr-2" />
+                Песочница
               </Button>
               <Button
                 variant={telegramStatus?.telegram_authorization_needed ? "default" : "outline"}
@@ -2861,6 +2912,115 @@ export default function AdminPage() {
                     </CardContent>
                   </Card>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sandbox Modal */}
+      {showSandboxModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+                  <FlaskRound className="w-6 h-6 mr-2 text-purple-500" />
+                  Песочница: Отладка Pipeline
+                </h2>
+                <Button variant="outline" onClick={() => setShowSandboxModal(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>🔧 Pipeline Sandbox</CardTitle>
+                    <p className="text-sm text-gray-600">
+                      Интерактивная среда для тестирования и отладки pipeline пост-сценарий
+                    </p>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <Label className="text-sm font-medium mb-2 block">
+                        Данные поста (JSON)
+                      </Label>
+                      <Textarea
+                        placeholder={`Пример:
+{
+  "id": "12345_@dnevteh",
+  "message_id": 12345,
+  "channel_username": "@dnevteh",
+  "text": "Текст поста для анализа",
+  "views": 1000,
+  "forwards": 50,
+  "reactions": 25
+}`}
+                        value={sandboxPostData}
+                        onChange={(e) => setSandboxPostData(e.target.value)}
+                        className="min-h-[120px] font-mono text-sm"
+                      />
+                    </div>
+
+                    <div className="flex gap-4">
+                      <Button
+                        onClick={handleTestSandbox}
+                        disabled={sandboxLoading || !sandboxPostData.trim()}
+                        className="flex-1"
+                      >
+                        {sandboxLoading ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        ) : (
+                          <FlaskRound className="w-4 h-4 mr-2" />
+                        )}
+                        {sandboxLoading ? 'Тестируем...' : 'Запустить тест'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setSandboxPostData('')
+                          setSandboxResult(null)
+                        }}
+                      >
+                        Очистить
+                      </Button>
+                    </div>
+
+                    {sandboxResult && (
+                      <div className="mt-6">
+                        <h3 className="text-lg font-medium mb-4">Результаты тестирования</h3>
+                        <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">Статус:</span>
+                            <Badge variant={sandboxResult.success ? "default" : "secondary"}>
+                              {sandboxResult.success ? "Успешно" : "Ошибка"}
+                            </Badge>
+                          </div>
+                          <div>
+                            <span className="font-medium">Post ID:</span>
+                            <code className="ml-2 bg-white px-2 py-1 rounded text-sm">
+                              {sandboxResult.post_id}
+                            </code>
+                          </div>
+                          <div>
+                            <span className="font-medium">Этапы pipeline:</span>
+                            <div className="mt-2 space-y-1">
+                              {sandboxResult.steps?.map((step: any) => (
+                                <div key={step.step} className="flex items-center justify-between text-sm">
+                                  <span>{step.step}. {step.description}</span>
+                                  <Badge variant="outline" className="text-xs">
+                                    {step.status}
+                                  </Badge>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
             </div>
           </div>

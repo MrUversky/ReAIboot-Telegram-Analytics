@@ -2601,6 +2601,64 @@ async def get_formats():
         logger.error(f"Ошибка получения форматов: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка получения форматов: {str(e)}")
 
+# Песочница для тестирования pipeline
+@app.post("/api/sandbox/test-pipeline", tags=["sandbox"])
+async def test_pipeline_sandbox(request: Dict[str, Any]):
+    """
+    Тестирование pipeline пост-сценарий в режиме песочницы.
+
+    - **post_data**: Данные поста для тестирования
+    - **options**: Опции тестирования (debug_mode, step_by_step и т.д.)
+    """
+    try:
+        post_data = request.get("post_data", {})
+        options = request.get("options", {})
+
+        if not post_data:
+            raise HTTPException(status_code=400, detail="Не переданы данные поста")
+
+        logger.info(f"🧪 Запуск тестирования pipeline в песочнице для поста {post_data.get('message_id', 'unknown')}")
+
+        # Пока возвращаем заглушку - полная реализация будет в следующем этапе
+        return {
+            "success": True,
+            "message": "Песочница инициализирована",
+            "post_id": post_data.get('id') or f"{post_data.get('message_id', 'unknown')}_{post_data.get('channel_username', 'unknown')}",
+            "debug_mode": options.get('debug_mode', True),
+            "steps": [
+                {
+                    "step": 1,
+                    "name": "post_validation",
+                    "status": "pending",
+                    "description": "Валидация данных поста"
+                },
+                {
+                    "step": 2,
+                    "name": "analysis",
+                    "status": "pending",
+                    "description": "LLM анализ поста"
+                },
+                {
+                    "step": 3,
+                    "name": "scenario_generation",
+                    "status": "pending",
+                    "description": "Генерация сценариев"
+                },
+                {
+                    "step": 4,
+                    "name": "database_save",
+                    "status": "pending",
+                    "description": "Сохранение результатов"
+                }
+            ]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка в песочнице: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка тестирования: {str(e)}")
+
 # Обработчик ошибок
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
