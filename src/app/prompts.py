@@ -154,16 +154,14 @@ class PromptManager:
 2. Какие ключевые факторы успеха?
 3. Что можно взять для создания собственного контента?
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON без какого-либо дополнительного текста, объяснений или форматирования. Начинай ответ прямо с { и заканчивай на }.
-
-Формат ответа:
+Верни анализ в JSON формате:
 {{
-  "success_factors": ["фактор1", "фактор2", "фактор3"],
-  "content_strengths": ["сильная сторона1", "сильная сторона2", "сильная сторона3"],
-  "audience_insights": ["инсайт1", "инсайт2", "инсайт3"],
-  "content_ideas": ["идея1", "идея2", "идея3"],
+  "success_factors": ["фактор1", "фактор2", ...],
+  "content_strengths": ["сильная сторона1", "сильная сторона2", ...],
+  "audience_insights": ["инсайт1", "инсайт2", ...],
+  "content_ideas": ["идея1", "идея2", ...],
   "lessons_learned": "выводы для нашего контента",
-  "recommended_topics": ["тема1", "тема2", "тема3"]
+  "recommended_topics": ["тема1", "тема2", ...]
 }}""",
             variables={
                 "post_text": "",
@@ -296,6 +294,14 @@ class PromptManager:
             "user_prompt": user_prompt
         }
 
+    def get_model_settings(self, prompt_name: str) -> Dict[str, Any]:
+        """Получает настройки модели для промпта."""
+        template = self.get_template(prompt_name)
+        if not template:
+            raise ValueError(f"Шаблон {prompt_name} не найден")
+
+        return getattr(template, 'model_settings', {})
+
     def get_system_prompt(self, prompt_name: str, variables: Dict[str, Any] = None) -> str:
         """Получает системный промпт с подстановкой переменных."""
         template = self.get_template(prompt_name)
@@ -409,7 +415,9 @@ class PromptManager:
         try:
             # Сначала пытаемся получить из базы данных
             if 'project_context_system' in self.templates:
-                return self.templates['project_context_system'].content
+                template = self.templates['project_context_system']
+                # Используем system_prompt или content как fallback
+                return template.system_prompt or getattr(template, 'content', '') or template.user_prompt
         except:
             pass
 

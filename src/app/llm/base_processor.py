@@ -27,6 +27,7 @@ class ProcessingResult:
     error: Optional[str] = None
     tokens_used: int = 0
     processing_time: float = 0.0
+    raw_response: Optional[str] = None
 
 
 class BaseLLMProcessor(ABC):

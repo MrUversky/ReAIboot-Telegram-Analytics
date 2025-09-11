@@ -18,6 +18,7 @@ except ImportError:
 from .base_processor import BaseLLMProcessor, ProcessingResult
 from ..settings import settings
 from ..utils import setup_logger
+from ..prompts import prompt_manager
 
 # Настройка логирования
 logger = setup_logger(__name__)
@@ -28,8 +29,16 @@ class AnalysisProcessor(BaseLLMProcessor):
 
     def __init__(self):
         """Инициализирует процессор анализа."""
+        # Импортируем prompt_manager
+        from ..prompts import prompt_manager
+        self.prompt_manager = prompt_manager
+
+        # Получаем модель из настроек промпта
+        model_settings = self.prompt_manager.get_model_settings("analyze_success")
+        model_name = model_settings.get('model', settings.analysis_model)
+
         super().__init__(
-            model_name="claude-3-5-sonnet-20241022",
+            model_name=model_name,
             api_key=settings.anthropic_api_key
         )
 
@@ -73,12 +82,11 @@ class AnalysisProcessor(BaseLLMProcessor):
                 )
 
             # Получаем system и user промпты из базы данных
-            from ..prompts import prompt_manager
-            system_prompt = prompt_manager.get_system_prompt("analyze_success_system", {
+            system_prompt = self.prompt_manager.get_system_prompt("analyze_success", {
                 "score": score
             })
 
-            user_prompt = prompt_manager.get_user_prompt("analyze_success_system", {
+            user_prompt = self.prompt_manager.get_user_prompt("analyze_success", {
                 "post_text": post_text,
                 "views": views,
                 "likes": reactions,  # используем reactions как likes
@@ -89,8 +97,9 @@ class AnalysisProcessor(BaseLLMProcessor):
             })
 
             # Debug: логируем промпты
-            logger.debug(f"🧪 ANALYSIS PROMPT - System: {system_prompt[:200]}...")
-            logger.debug(f"🧪 ANALYSIS PROMPT - User: {user_prompt[:200]}...")
+            logger.debug(f"🧪 ANALYSIS PROMPT - System: {system_prompt}")
+            logger.debug(f"🧪 ANALYSIS PROMPT - User: {user_prompt}")
+            logger.debug(f"🧪 ANALYSIS INPUT DATA: post_text={post_text[:100]}..., views={views}, reactions={reactions}, score={score}")
 
             # Выполняем запрос к Claude
             success, response, error = await self._make_request_with_retry(
@@ -118,8 +127,9 @@ class AnalysisProcessor(BaseLLMProcessor):
             tokens_used = self._calculate_tokens(user_prompt, result_text)
 
             # Debug: логируем сырой ответ от LLM
-            logger.debug(f"🧪 ANALYSIS RAW RESPONSE: {result_text[:500]}...")
+            logger.debug(f"🧪 ANALYSIS RAW RESPONSE: {result_text}")
             logger.debug(f"🧪 ANALYSIS RESPONSE LENGTH: {len(result_text)} chars")
+            logger.debug(f"🧪 ANALYSIS TOKENS USED: {tokens_used}")
 
             # Валидируем ответ по схеме
             schema = self.get_stage_schema("analysis")
@@ -133,7 +143,8 @@ class AnalysisProcessor(BaseLLMProcessor):
                         "analysis_model": "claude-3-5-sonnet"
                     },
                     tokens_used=tokens_used,
-                    processing_time=time.time() - start_time
+                    processing_time=time.time() - start_time,
+                    raw_response=result_text
                 )
             else:
                 logger.warning(f"Analysis validation failed: {validation_error}")
@@ -150,7 +161,8 @@ class AnalysisProcessor(BaseLLMProcessor):
                             "validation_warning": validation_error
                         },
                         tokens_used=tokens_used,
-                        processing_time=time.time() - start_time
+                        processing_time=time.time() - start_time,
+                        raw_response=result_text
                     )
                 except json.JSONDecodeError:
                     logger.warning(f"Не удалось распарсить JSON от Claude: {result_text}")
@@ -165,7 +177,8 @@ class AnalysisProcessor(BaseLLMProcessor):
                             "validation_error": validation_error
                         },
                         tokens_used=tokens_used,
-                        processing_time=time.time() - start_time
+                        processing_time=time.time() - start_time,
+                        raw_response=result_text
                     )
 
         except Exception as e:
@@ -173,5 +186,6 @@ class AnalysisProcessor(BaseLLMProcessor):
             return ProcessingResult(
                 success=False,
                 error=f"Внутренняя ошибка: {str(e)}",
-                processing_time=time.time() - start_time
+                processing_time=time.time() - start_time,
+                raw_response=None
             )

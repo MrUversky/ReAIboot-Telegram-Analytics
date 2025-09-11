@@ -16,6 +16,7 @@ from ..settings import settings
 from ..price_monitor import price_monitor
 from ..utils import setup_logger
 from ..supabase_client import supabase_client
+from ..prompts import prompt_manager
 
 # Настройка логирования
 logger = setup_logger(__name__)
@@ -142,10 +143,26 @@ class LLMOrchestrator:
             if not skip_filter:
                 logger.info(f"Этап 1: Фильтрация поста {post_id}")
 
-                # Debug: Логируем начало фильтрации
-                self._log_debug_step("filter_start", "llm_call", {
-                    "input_data": post_data,
-                    "processor": "FilterProcessor"
+                # Debug: Логируем промпты фильтрации
+                filter_system_prompt = prompt_manager.get_system_prompt("filter_posts_system", {
+                    "views": post_data.get("views", 0),
+                    "reactions": post_data.get("reactions", 0),
+                    "replies": post_data.get("replies", 0),
+                    "forwards": post_data.get("forwards", 0)
+                })
+                filter_user_prompt = prompt_manager.get_user_prompt("filter_posts_system", {
+                    "post_text": post_data.get("text", "")[:2000],
+                    "views": post_data.get("views", 0),
+                    "reactions": post_data.get("reactions", 0),
+                    "replies": post_data.get("replies", 0),
+                    "forwards": post_data.get("forwards", 0),
+                    "channel_title": post_data.get("channel_title", "")
+                })
+
+                self._log_debug_step("filter_prompts", "prompts", {
+                    "system_prompt": filter_system_prompt,
+                    "user_prompt": filter_user_prompt,
+                    "model": self.filter_processor.model_name
                 })
 
                 filter_result = await self.filter_processor.process(post_data)
@@ -198,10 +215,24 @@ class LLMOrchestrator:
                 logger.info(f"Этап 2: Анализ поста {post_id}")
                 filter_score = filter_result.data.get("score", 0) if filter_result else 0
 
-                # Debug: Логируем начало анализа
-                self._log_debug_step("analysis_start", "llm_call", {
-                    "input_data": {**post_data, "filter_score": filter_score},
-                    "processor": "AnalysisProcessor"
+                # Debug: Логируем промпты анализа
+                analysis_system_prompt = prompt_manager.get_system_prompt("analyze_success_system", {
+                    "score": filter_score
+                })
+                analysis_user_prompt = prompt_manager.get_user_prompt("analyze_success_system", {
+                    "post_text": post_data.get("text", ""),
+                    "views": post_data.get("views", 0),
+                    "likes": post_data.get("reactions", 0),
+                    "forwards": post_data.get("forwards", 0),
+                    "replies": post_data.get("replies", 0),
+                    "channel_title": post_data.get("channel_title", ""),
+                    "score": filter_score
+                })
+
+                self._log_debug_step("analysis_prompts", "prompts", {
+                    "system_prompt": analysis_system_prompt,
+                    "user_prompt": analysis_user_prompt,
+                    "model": self.analysis_processor.model_name
                 })
 
                 analysis_result = await self.analysis_processor.process({
@@ -259,7 +290,35 @@ class LLMOrchestrator:
                     "available_formats": available_formats
                 }
 
+                # Debug: Логируем промпты рубрикации
+                rubric_system_prompt = prompt_manager.get_system_prompt("rubric_selector_system", {})
+                rubric_user_prompt = prompt_manager.get_user_prompt("rubric_selector_system", {
+                    "post_text": post_data.get("text", "")[:2000],
+                    "analysis": str(analysis_data),
+                    "views": post_data.get("views", 0),
+                    "reactions": post_data.get("reactions", 0),
+                    "replies": post_data.get("replies", 0),
+                    "forwards": post_data.get("forwards", 0),
+                    "available_rubrics": str(available_rubrics),
+                    "available_formats": str(available_formats)
+                })
+
+                self._log_debug_step("rubric_selection_prompts", "prompts", {
+                    "system_prompt": rubric_system_prompt,
+                    "user_prompt": rubric_user_prompt,
+                    "model": self.rubric_selector.model_name
+                })
+
                 rubric_result = await self.rubric_selector.process(rubric_selection_data)
+
+                # Debug: Логируем результат рубрикации
+                self._log_debug_step("rubric_selection_complete", "llm_response", {
+                    "success": rubric_result.success,
+                    "result": rubric_result.data,
+                    "error": rubric_result.error,
+                    "tokens_used": rubric_result.tokens_used,
+                    "processing_time": rubric_result.processing_time
+                })
 
                 stages.append(ProcessingStage(
                     stage_name="rubric_selection",
@@ -275,6 +334,17 @@ class LLMOrchestrator:
                 # Если выбор рубрик не удался, используем дефолтные
                 if not rubric_result.success:
                     logger.warning(f"Выбор рубрик для поста {post_id} не удался: {rubric_result.error}")
+                    # Debug: Логируем ошибку
+                    self._log_debug_step("rubric_selection_error", "error", {
+                        "error": rubric_result.error,
+                        "stage": "rubric_selection",
+                        "post_id": post_id,
+                        "details": {
+                            "input_data": rubric_selection_data,
+                            "tokens_used": rubric_result.tokens_used,
+                            "processing_time": rubric_result.processing_time
+                        }
+                    })
             else:
                 logger.info(f"Пропускаем выбор рубрик для поста {post_id}")
                 stages.append(ProcessingStage(
@@ -288,22 +358,103 @@ class LLMOrchestrator:
             # Этап 4: Генерация сценариев (если не пропускается)
             if not skip_rubric_selection:
                 logger.info(f"Этап 4: Генерация сценариев для поста {post_id}")
+                logger.info(f"Rubric result: {rubric_result.success if rubric_result else 'None'}")
+                logger.info(f"Rubric data: {rubric_result.data if rubric_result else 'None'}")
                 scenarios = []
                 if rubric_result and rubric_result.success:
                     combinations = rubric_result.data.get("combinations", [])[:2]  # Топ-2 комбинации
+                    if not combinations:
+                        # Попробуем найти в top_combinations или top_3_combinations
+                        combinations = rubric_result.data.get("top_combinations", [])[:2]
+                        if not combinations:
+                            # Обработка формата top_3_combinations
+                            top_3_combinations = rubric_result.data.get("top_3_combinations", [])[:2]
+                            combinations = []
+                            for item in top_3_combinations:
+                                if isinstance(item, dict):
+                                    # Если item содержит 'combination', берем его
+                                    if 'combination' in item:
+                                        combinations.append(item['combination'])
+                                    # Иначе берем item напрямую (если он уже содержит rubric/format)
+                                    elif 'rubric' in item and 'format' in item:
+                                        combinations.append(item)
+                        logger.info(f"Using alternative combinations field: {len(combinations)} found")
+                    logger.info(f"Combinations found: {len(combinations)}")
+                    for combo in combinations:
+                        logger.info(f"Combination: {combo}")
 
                     for i, combination in enumerate(combinations):
                         logger.info(f"Генерация сценария {i+1}/{len(combinations)} для поста {post_id}")
 
+                        # Получаем информацию о формате из комбинации
+                        format_info = combination.get("format", {})
+                        if isinstance(format_info, str):
+                            # Если format - строка, используем дефолтные настройки
+                            duration = 60
+                            format_name = format_info
+                        else:
+                            # Если format - объект, берем данные из него
+                            duration = format_info.get('duration_seconds') or format_info.get('duration', 60)
+                            format_name = format_info.get('name', 'Неизвестный формат')
+
+                        logger.info(f"Processing combination: rubric={combination.get('rubric')}, format={format_name}, duration={duration}")
+
+                        # Исправляем формат данных для генератора
+                        rubric_data = combination.get("rubric", {})
+                        format_data = combination.get("format", {})
+
+                        # Если rubric - строка, преобразуем в объект
+                        if isinstance(rubric_data, str):
+                            rubric_data = {"name": rubric_data}
+
+                        # Если format - строка, преобразуем в объект
+                        if isinstance(format_data, str):
+                            format_data = {"name": format_data, "duration": duration}
+
                         generator_input = {
                             **post_data,
                             "analysis": analysis_result.data if analysis_result and analysis_result.success else {},
-                            "rubric": combination.get("rubric", {}),
-                            "reel_format": combination.get("format", {}),
+                            "rubric": rubric_data,
+                            "reel_format": format_data,
                             "combination_score": combination.get("score", 0)
                         }
 
+                        # Debug: Логируем промпты генерации
+
+                        generator_system_prompt = prompt_manager.get_system_prompt("generate_scenario_system", {
+                            "duration": duration
+                        })
+                        # Получаем информацию о рубрике
+                        rubric_info = combination.get("rubric", {})
+                        if isinstance(rubric_info, str):
+                            rubric_name = rubric_info
+                        else:
+                            rubric_name = rubric_info.get('name', 'Не указана')
+
+                        generator_user_prompt = prompt_manager.get_user_prompt("generate_scenario_system", {
+                            "post_text": post_data.get("text", ""),
+                            "post_analysis": str(analysis_result.data if analysis_result and analysis_result.success else {}),
+                            "rubric_name": rubric_name,
+                            "format_name": format_name,
+                            "duration": duration
+                        })
+
+                        self._log_debug_step(f"generation_{i+1}_prompts", "prompts", {
+                            "system_prompt": generator_system_prompt,
+                            "user_prompt": generator_user_prompt,
+                            "model": self.generator_processor.model_name
+                        })
+
                         scenario_result = await self.generator_processor.process(generator_input)
+
+                        # Debug: Логируем результат генерации
+                        self._log_debug_step(f"generation_{i+1}_complete", "llm_response", {
+                            "success": scenario_result.success,
+                            "result": scenario_result.data,
+                            "error": scenario_result.error,
+                            "tokens_used": scenario_result.tokens_used,
+                            "processing_time": scenario_result.processing_time
+                        })
 
                         if scenario_result.success:
                             scenarios.append({
@@ -325,7 +476,7 @@ class LLMOrchestrator:
 
                         total_tokens += scenario_result.tokens_used
                 else:
-                    # Если нет выбранных комбинаций, генерируем с дефолтными параметрами
+                    # Если нет выбранных комбинаций или rubric failed, генерируем с дефолтными параметрами
                     logger.info(f"Генерация сценария с дефолтными параметрами для поста {post_id}")
 
                     generator_input = {
@@ -382,7 +533,8 @@ class LLMOrchestrator:
             else:
                 overall_success = len(scenarios) > 0
 
-            return OrchestratorResult(
+            # Создаем финальный результат
+            final_result = OrchestratorResult(
                 post_id=post_id,
                 overall_success=overall_success,
                 stages=stages,
@@ -390,6 +542,12 @@ class LLMOrchestrator:
                 total_tokens=total_tokens,
                 total_time=asyncio.get_event_loop().time() - start_time
             )
+
+            # Сохраняем результаты в базу данных если есть успешные результаты
+            if overall_success and supabase_client.is_connected():
+                await self._save_results_to_database([final_result], [post_data])
+
+            return final_result
 
         except Exception as e:
             logger.error(f"Критическая ошибка в enhanced оркестраторе для поста {post_id}: {e}", exc_info=True)
@@ -717,9 +875,24 @@ class LLMOrchestrator:
                                 'post_id': result.post_id,
                                 'created_at': self._get_current_timestamp()
                             }
+
+                            # Debug: Логируем сохранение токенов
+                            self._log_debug_step("db_save_tokens", "db_operation", {
+                                "operation": "save_token_usage",
+                                "data": token_data,
+                                "stage": stage.stage_name
+                            })
+
                             supabase_client.save_token_usage(token_data)
 
                         # Сохраняем анализ
+                        # Debug: Логируем сохранение анализа
+                        self._log_debug_step("db_save_analysis", "db_operation", {
+                            "operation": "save_post_analysis",
+                            "data": analysis_data,
+                            "stage": stage.stage_name
+                        })
+
                         if supabase_client.save_post_analysis(analysis_data):
                             saved_analyses += 1
 
@@ -746,6 +919,14 @@ class LLMOrchestrator:
                             'updated_at': self._get_current_timestamp()
                         }
                         scenarios_data.append(scenario_data)
+
+                    # Debug: Логируем сохранение сценариев
+                    self._log_debug_step("db_save_scenarios", "db_operation", {
+                        "operation": "save_scenarios",
+                        "scenarios_count": len(scenarios_data),
+                        "data": scenarios_data,
+                        "post_id": result.post_id
+                    })
 
                     if supabase_client.save_scenarios(scenarios_data):
                         saved_scenarios += len(scenarios_data)

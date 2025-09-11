@@ -28,8 +28,16 @@ class FilterProcessor(BaseLLMProcessor):
 
     def __init__(self):
         """Инициализирует процессор фильтрации."""
+        # Импортируем prompt_manager
+        from ..prompts import prompt_manager
+        self.prompt_manager = prompt_manager
+
+        # Получаем модель из настроек промпта
+        model_settings = self.prompt_manager.get_model_settings("filter_posts_system")
+        model_name = model_settings.get('model', settings.filter_model)
+
         super().__init__(
-            model_name="gpt-4o-mini",
+            model_name=model_name,
             api_key=settings.openai_api_key
         )
 
@@ -75,14 +83,14 @@ class FilterProcessor(BaseLLMProcessor):
                 )
 
             # Получаем system и user промпты из базы данных
-            system_prompt = prompt_manager.get_system_prompt("filter_posts_system", {
+            system_prompt = self.prompt_manager.get_system_prompt("filter_posts_system", {
                 "views": views,
                 "reactions": reactions,
                 "replies": replies,
                 "forwards": forwards
             })
 
-            user_prompt = prompt_manager.get_user_prompt("filter_posts_system", {
+            user_prompt = self.prompt_manager.get_user_prompt("filter_posts_system", {
                 "post_text": post_text[:2000],
                 "views": views,
                 "reactions": reactions,
@@ -92,8 +100,9 @@ class FilterProcessor(BaseLLMProcessor):
             })
 
             # Debug: логируем промпты
-            logger.debug(f"🧪 FILTER PROMPT - System: {system_prompt[:200]}...")
-            logger.debug(f"🧪 FILTER PROMPT - User: {user_prompt[:200]}...")
+            logger.debug(f"🧪 FILTER PROMPT - System: {system_prompt}")
+            logger.debug(f"🧪 FILTER PROMPT - User: {user_prompt}")
+            logger.debug(f"🧪 FILTER INPUT DATA: post_text={post_text[:100]}..., views={views}, reactions={reactions}, forwards={forwards}")
 
             # Выполняем запрос
             success, response, error = await self._make_request_with_retry(
@@ -121,8 +130,9 @@ class FilterProcessor(BaseLLMProcessor):
             tokens_used = self._calculate_tokens(user_prompt, result_text)
 
             # Debug: логируем сырой ответ от LLM
-            logger.debug(f"🧪 FILTER RAW RESPONSE: {result_text[:300]}...")
+            logger.debug(f"🧪 FILTER RAW RESPONSE: {result_text}")
             logger.debug(f"🧪 FILTER RESPONSE LENGTH: {len(result_text)} chars")
+            logger.debug(f"🧪 FILTER TOKENS USED: {tokens_used}")
 
             # Валидируем ответ по схеме
             schema = self.get_stage_schema("filter")
@@ -133,10 +143,11 @@ class FilterProcessor(BaseLLMProcessor):
                     success=True,
                     data={
                         **validated_data,
-                        "filter_model": "gpt-4o-mini"
+                        "filter_model": self.model_name
                     },
                     tokens_used=tokens_used,
-                    processing_time=time.time() - start_time
+                    processing_time=time.time() - start_time,
+                    raw_response=result_text
                 )
             else:
                 logger.warning(f"Filter validation failed: {validation_error}")
@@ -154,17 +165,19 @@ class FilterProcessor(BaseLLMProcessor):
                             "score": score,
                             "suitable": suitable,
                             "reason": reason,
-                            "filter_model": "gpt-4o-mini",
+                            "filter_model": self.model_name,
                             "validation_warning": validation_error
                         },
                         tokens_used=tokens_used,
-                        processing_time=time.time() - start_time
+                        processing_time=time.time() - start_time,
+                        raw_response=result_text
                     )
                 except json.JSONDecodeError:
                     return ProcessingResult(
                         success=False,
                         error=f"Не удалось распарсить JSON ответ: {result_text}. Ошибка валидации: {validation_error}",
-                        processing_time=time.time() - start_time
+                        processing_time=time.time() - start_time,
+                        raw_response=result_text
                     )
 
         except Exception as e:
@@ -172,5 +185,6 @@ class FilterProcessor(BaseLLMProcessor):
             return ProcessingResult(
                 success=False,
                 error=f"Внутренняя ошибка: {str(e)}",
-                processing_time=time.time() - start_time
+                processing_time=time.time() - start_time,
+                raw_response=None
             )

@@ -32,6 +32,13 @@ class Settings:
 
         # Claude настройки
         self.anthropic_api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+        self.anthropic_model_name = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+
+        # Модели для разных процессоров
+        self.filter_model = os.getenv("FILTER_MODEL", self.openai_model_name)
+        self.analysis_model = os.getenv("ANALYSIS_MODEL", self.anthropic_model_name)
+        self.rubric_model = os.getenv("RUBRIC_MODEL", "gpt-4o")
+        self.generator_model = os.getenv("GENERATOR_MODEL", "gpt-4o")
 
         # Supabase настройки
         self.supabase_url = os.getenv("SUPABASE_URL")
@@ -288,7 +295,6 @@ class LLMPriceManager:
 
         except Exception as e:
             logging.warning(f"Ошибка при запросе к публичному источнику Anthropic: {e}")
-
         return None
 
     def calculate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:

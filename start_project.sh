@@ -128,44 +128,24 @@ if [ -d "reai-boot-ui" ]; then
     echo "🔧 Backend API: http://localhost:8000"
     echo "📚 API Docs: http://localhost:8000/docs"
     echo ""
-    echo "Для остановки нажмите Ctrl+C"
+    echo "Сервисы запущены в фоне. Для остановки используйте:"
+    echo "  ./stop_project.sh"
     echo "================================="
 
-    # Функция очистки при завершении
-    cleanup() {
-        echo ""
-        echo "🛑 Остановка сервисов..."
+    # Сохраняем PIDs в файл для последующей остановки
+    echo "$API_PID" > .running_pids
+    echo "$FRONTEND_PID" >> .running_pids
 
-        # Мягкая остановка
-        kill $API_PID 2>/dev/null
-        kill $FRONTEND_PID 2>/dev/null
-
-        # Принудительная остановка через 5 секунд
-        sleep 2
-        pkill -9 -f "python.*run_api.py" 2>/dev/null
-        pkill -9 -f "venv_py39/bin/python.*run_api.py" 2>/dev/null
-        pkill -9 -f "npm.*run.*dev" 2>/dev/null
-        lsof -ti:8000 | xargs kill -9 2>/dev/null
-        lsof -ti:3000 | xargs kill -9 2>/dev/null
-
-        echo "✅ Все сервисы остановлены"
-        exit 0
-    }
-
-    # Обработка сигналов завершения
-    trap cleanup SIGINT SIGTERM
-
-    # Ожидание завершения
-    wait
+    echo "✅ PIDs сохранены в .running_pids"
+    echo "✅ Скрипт завершен - сервисы работают в фоне"
 else
     echo "⚠️  Директория reai-boot-ui не найдена!"
     echo "Frontend не будет запущен"
     echo ""
     echo "✅ Backend API запущен на http://localhost:8000"
     echo "📚 Документация: http://localhost:8000/docs"
-    echo ""
-    echo "Для остановки нажмите Ctrl+C"
 
-    # Ожидание завершения
-    wait $API_PID
+    # Сохраняем PID API для остановки
+    echo "$API_PID" > .running_pids
+    echo "✅ PID сохранен в .running_pids"
 fi

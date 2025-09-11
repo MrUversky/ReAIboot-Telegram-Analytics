@@ -17,6 +17,7 @@ except ImportError:
 from .base_processor import BaseLLMProcessor, ProcessingResult
 from ..settings import settings
 from ..utils import setup_logger
+from ..prompts import prompt_manager
 
 # Настройка логирования
 logger = setup_logger(__name__)
@@ -27,8 +28,16 @@ class GeneratorProcessor(BaseLLMProcessor):
 
     def __init__(self):
         """Инициализирует процессор генерации."""
+        # Импортируем prompt_manager
+        from ..prompts import prompt_manager
+        self.prompt_manager = prompt_manager
+
+        # Получаем модель из настроек промпта
+        model_settings = self.prompt_manager.get_model_settings("generate_scenario_system")
+        model_name = model_settings.get('model', settings.generator_model)
+
         super().__init__(
-            model_name="gpt-4o",
+            model_name=model_name,
             api_key=settings.openai_api_key
         )
 
@@ -79,7 +88,6 @@ class GeneratorProcessor(BaseLLMProcessor):
                 )
 
             # Получаем system и user промпты из базы данных
-            from ..prompts import prompt_manager
 
             # Определяем длительность по формату или используем дефолт
             # Проверяем оба возможных названия поля: duration_seconds и duration
@@ -87,17 +95,22 @@ class GeneratorProcessor(BaseLLMProcessor):
             if duration is None:
                 duration = 60  # Default to 60 seconds if not found
 
-            system_prompt = prompt_manager.get_system_prompt("generate_scenario_system", {
+            system_prompt = self.prompt_manager.get_system_prompt("generate_scenario_system", {
                 "duration": duration
             })
 
-            user_prompt = prompt_manager.get_user_prompt("generate_scenario_system", {
+            user_prompt = self.prompt_manager.get_user_prompt("generate_scenario_system", {
                 "post_text": post_text,
                 "post_analysis": str(analysis),  # передаем анализ как строку
                 "rubric_name": rubric.get('name', 'Не указана'),
                 "format_name": reel_format.get('name', 'Не указан'),
                 "duration": duration
             })
+
+            # Debug: логируем промпты
+            logger.debug(f"🧪 GENERATOR PROMPT - System: {system_prompt}")
+            logger.debug(f"🧪 GENERATOR PROMPT - User: {user_prompt}")
+            logger.debug(f"🧪 GENERATOR INPUT DATA: post_text={post_text[:100]}..., rubric={rubric.get('name')}, format={reel_format.get('name')}, duration={duration}")
 
             # Выполняем запрос
             success, response, error = await self._make_request_with_retry(
@@ -124,6 +137,11 @@ class GeneratorProcessor(BaseLLMProcessor):
             result_text = response.choices[0].message.content
             tokens_used = self._calculate_tokens(user_prompt, result_text)
 
+            # Debug: логируем сырой ответ от LLM
+            logger.debug(f"🧪 GENERATOR RAW RESPONSE: {result_text}")
+            logger.debug(f"🧪 GENERATOR RESPONSE LENGTH: {len(result_text)} chars")
+            logger.debug(f"🧪 GENERATOR TOKENS USED: {tokens_used}")
+
             # Валидируем ответ по схеме
             schema = self.get_stage_schema("generation")
             success, validated_data, validation_error = self.validate_json_response(result_text, schema)
@@ -133,7 +151,7 @@ class GeneratorProcessor(BaseLLMProcessor):
                     success=True,
                     data={
                         **validated_data,
-                        "generator_model": "gpt-4o",
+                        "generator_model": self.model_name,
                         "source_post": {
                             "text_preview": post_text[:200],
                             "rubric": rubric.get("name"),
@@ -141,7 +159,8 @@ class GeneratorProcessor(BaseLLMProcessor):
                         }
                     },
                     tokens_used=tokens_used,
-                    processing_time=time.time() - start_time
+                    processing_time=time.time() - start_time,
+                    raw_response=result_text
                 )
             else:
                 logger.warning(f"Generation validation failed: {validation_error}")
@@ -166,7 +185,7 @@ class GeneratorProcessor(BaseLLMProcessor):
                         success=True,
                         data={
                             **fallback_data,
-                            "generator_model": "gpt-4o",
+                            "generator_model": self.model_name,
                             "source_post": {
                                 "text_preview": post_text[:200],
                                 "rubric": rubric.get("name"),
@@ -175,7 +194,8 @@ class GeneratorProcessor(BaseLLMProcessor):
                             "validation_warning": validation_error
                         },
                         tokens_used=tokens_used,
-                        processing_time=time.time() - start_time
+                        processing_time=time.time() - start_time,
+                        raw_response=result_text
                     )
 
                 except json.JSONDecodeError:
@@ -190,7 +210,7 @@ class GeneratorProcessor(BaseLLMProcessor):
                                 success=True,
                                 data={
                                     **fallback_data,
-                                    "generator_model": "gpt-4o",
+                                    "generator_model": self.model_name,
                                     "source_post": {
                                         "text_preview": post_text[:200],
                                         "rubric": rubric.get("name"),
@@ -199,7 +219,8 @@ class GeneratorProcessor(BaseLLMProcessor):
                                     "validation_warning": validation_error
                                 },
                                 tokens_used=tokens_used,
-                                processing_time=time.time() - start_time
+                                processing_time=time.time() - start_time,
+                                raw_response=result_text
                             )
                         except:
                             pass
@@ -209,12 +230,13 @@ class GeneratorProcessor(BaseLLMProcessor):
                         success=True,
                         data={
                             "raw_scenario": result_text,
-                            "generator_model": "gpt-4o",
+                            "generator_model": self.model_name,
                             "parsing_error": "JSON parsing failed",
                             "validation_error": validation_error
                         },
                         tokens_used=tokens_used,
-                        processing_time=time.time() - start_time
+                        processing_time=time.time() - start_time,
+                        raw_response=result_text
                     )
 
         except Exception as e:
@@ -222,5 +244,6 @@ class GeneratorProcessor(BaseLLMProcessor):
             return ProcessingResult(
                 success=False,
                 error=f"Внутренняя ошибка: {str(e)}",
-                processing_time=time.time() - start_time
+                processing_time=time.time() - start_time,
+                raw_response=None
             )

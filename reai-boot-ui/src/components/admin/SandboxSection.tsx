@@ -14,7 +14,7 @@ interface SandboxSectionProps {
   // Props will be added as needed
 }
 
-export const SandboxSection: React.FC<SandboxSectionProps> = () => {
+export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
   const [postData, setPostData] = useState('')
   const [result, setResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
@@ -93,18 +93,59 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
         })
       })
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
+      console.log('Starting API call...')
+      let result;
 
-      const result = await response.json()
-      setResult(result)
-      setLogSearchTerm('')
-      setLogFilterType('all')
-      setLogFilterSuccess('all')
+      try {
+        if (response.ok) {
+          result = await response.json()
+          console.log('✅ API Response received:', result)
+          console.log('✅ Debug log:', result.debug_log)
+          console.log('✅ Debug log length:', result.debug_log?.length)
+          console.log('✅ Debug log type:', typeof result.debug_log)
+          console.log('✅ Debug log is array:', Array.isArray(result.debug_log))
+        } else {
+          console.log('❌ HTTP Error:', response.status, response.statusText)
+          try {
+            result = await response.json()
+            console.log('❌ API Error Response:', result)
+          } catch (e) {
+            console.log('❌ Failed to parse error response:', e)
+            result = {
+              success: false,
+              error: `HTTP ${response.status}: ${response.statusText}`,
+              debug_log: [{ type: 'error', message: `HTTP ${response.status}: ${response.statusText}`, timestamp: new Date().toISOString() }],
+              stages: []
+            }
+          }
+        }
+
+        console.log('📝 Setting result state:', result)
+        setResult(result)
+        console.log('✅ Result state set successfully')
+
+        // Сбрасываем фильтры
+        setLogSearchTerm('')
+        setLogFilterType('all')
+        setLogFilterSuccess('all')
+
+      } catch (error) {
+        console.error('💥 Error in testSandbox:', error)
+        const errorResult = {
+          success: false,
+          error: (error as Error).message || 'Неизвестная ошибка',
+          debug_log: [{ type: 'error', message: (error as Error).message || 'Неизвестная ошибка', timestamp: new Date().toISOString() }],
+          stages: []
+        }
+        console.log('📝 Setting error result:', errorResult)
+        setResult(errorResult)
+      } finally {
+        console.log('🏁 Setting loading to false')
+        setLoading(false)
+      }
     } catch (error) {
-      console.error('Error testing sandbox:', error)
-      alert('Ошибка при тестировании песочницы')
+      console.error('💥 Outer error in handleTest:', error)
+      alert('Ошибка при тестировании песочницы: ' + (error as Error).message)
     } finally {
       setLoading(false)
     }
@@ -446,7 +487,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
               <SelectTrigger className="flex-1 min-w-[400px]">
                 <SelectValue placeholder={loadingPosts ? "Загрузка постов..." : "Выберите пост из базы данных"} />
               </SelectTrigger>
-              <SelectContent className="max-w-[600px]">
+              <SelectContent>
                 <SelectItem value="">Очистить выбор</SelectItem>
                 {availablePosts.map((post: any) => {
                   const postDate = new Date(post.date || post.created_at).toLocaleDateString('ru-RU', {
@@ -460,7 +501,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
                   const displayText = cleanText ? shortText : '📝 Пост без текста';
 
                   return (
-                    <SelectItem key={post.id} value={post.id} className="py-3">
+                    <SelectItem key={post.id} value={post.id}>
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-sm">{post.channel_title || post.channel_username}</span>
@@ -528,7 +569,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
             Очистить
           </Button>
           {stepByStepMode && (
-            <Button variant="destructive" onClick={resetStepByStepExecution} size="sm">
+            <Button variant="secondary" onClick={resetStepByStepExecution} size="sm">
               Сбросить шаги
             </Button>
           )}
@@ -544,10 +585,152 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
           </div>
         )}
 
+        {/* Step-by-Step Progress Display */}
+        {stepByStepMode && stepResults.length > 0 && (
+          <div className="mt-6">
+            <h3 className="text-lg font-medium mb-4">📋 Пошаговое выполнение</h3>
+
+            {/* Progress indicator */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-medium text-blue-800">
+                  Прогресс: Шаг {currentStep} из 4
+                </div>
+                <div className="flex gap-1">
+                  {[0, 1, 2, 3].map((step) => (
+                    <div
+                      key={step}
+                      className={`w-3 h-3 rounded-full ${
+                        step < currentStep
+                          ? 'bg-green-500'
+                          : step === currentStep - 1
+                          ? 'bg-blue-500 animate-pulse'
+                          : 'bg-gray-300'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="text-xs text-blue-700">
+                {currentStep === 0 && 'Готов к началу'}
+                {currentStep === 1 && '✅ Фильтрация выполнена'}
+                {currentStep === 2 && '✅ Анализ выполнен'}
+                {currentStep === 3 && '✅ Рубрикация выполнена'}
+                {currentStep === 4 && '🎉 Pipeline завершен'}
+              </div>
+            </div>
+
+            {/* Step Results */}
+            <div className="space-y-4 mb-6">
+              <h4 className="text-md font-medium">Результаты шагов</h4>
+              {stepResults.map((stepResult, index) => (
+                <div key={index} className="border rounded-lg p-4 bg-white">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center space-x-2">
+                      <Badge variant={stepResult.success ? "default" : "secondary"}>
+                        {stepResult.success ? "✅" : "❌"} Шаг {index + 1}
+                      </Badge>
+                      <span className="text-sm text-gray-500">
+                        {stepResult.total_time || 0}s • {stepResult.total_tokens || 0} токенов
+                      </span>
+                    </div>
+                    {stepResult.final_data && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => startEditingStep(index)}
+                      >
+                        ✏️ Редактировать
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Step Debug Log */}
+                  {stepResult.debug_log && Array.isArray(stepResult.debug_log) && stepResult.debug_log.length > 0 && (
+                    <div className="mt-3">
+                      <h5 className="text-sm font-medium mb-2 text-gray-700">
+                        📝 Лог шага {index + 1} ({stepResult.debug_log.length} записей)
+                      </h5>
+                      <div className="bg-gray-50 rounded p-3 max-h-40 overflow-y-auto">
+                        {stepResult.debug_log.map((log: any, logIndex: number) => (
+                          <div key={logIndex} className="text-xs mb-2 last:mb-0">
+                            <div className="flex items-center space-x-2 mb-1">
+                              <Badge variant="outline" className="text-xs">
+                                {log.step_type || 'info'}
+                              </Badge>
+                              <span className="font-mono text-gray-600">
+                                {log.step_name || `step_${logIndex + 1}`}
+                              </span>
+                              <span className="text-gray-400">
+                                {(log.timestamp || 0).toFixed(3)}s
+                              </span>
+                            </div>
+                            {log.data && (
+                              <div className="bg-white p-2 rounded border text-gray-700 ml-4">
+                                {log.step_type === 'prompts' ? (
+                                  <div className="space-y-2">
+                                    <div>
+                                      <div className="font-medium text-purple-700 text-xs mb-1">🤖 System Prompt:</div>
+                                      <div className="bg-purple-50 p-1 rounded text-xs font-mono whitespace-pre-wrap max-h-20 overflow-y-auto">
+                                        {log.data?.system_prompt || 'N/A'}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="font-medium text-blue-700 text-xs mb-1">👤 User Prompt:</div>
+                                      <div className="bg-blue-50 p-1 rounded text-xs font-mono whitespace-pre-wrap max-h-20 overflow-y-auto">
+                                        {log.data?.user_prompt || 'N/A'}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : log.step_type === 'llm_response' && log.data?.raw_response ? (
+                                  <div className="space-y-1">
+                                    <div className="font-medium text-green-700 text-xs">📝 Raw LLM Response:</div>
+                                    <div className="bg-green-50 p-1 rounded text-xs font-mono whitespace-pre-wrap max-h-20 overflow-y-auto">
+                                      {log.data.raw_response}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <JsonHighlighter data={log.data} />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Error display */}
+                  {stepResult.error && (
+                    <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded">
+                      <div className="text-xs text-red-700">
+                        <strong>Ошибка:</strong> {stepResult.error}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Results Display */}
-        {result && (
+        {result ? (
           <div className="mt-6">
             <h3 className="text-lg font-medium mb-4">Результаты тестирования</h3>
+            {/* Debug: Show raw result data */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+              <h4 className="text-sm font-medium text-yellow-800 mb-2">🔍 Отладочная информация:</h4>
+              <div className="text-xs text-yellow-700 space-y-1">
+                <div>Result exists: {result ? '✅' : '❌'}</div>
+                <div>Success: {result.success ? '✅' : '❌'}</div>
+                <div>Debug log length: {result.debug_log?.length || 0}</div>
+                <div>Debug log type: {typeof result.debug_log}</div>
+                <div>Debug log is array: {Array.isArray(result.debug_log) ? '✅' : '❌'}</div>
+                {result.error && <div>Error: {result.error}</div>}
+              </div>
+            </div>
 
             {/* Main Info */}
             <div className="bg-gray-50 rounded-lg p-4 space-y-3 mb-6">
@@ -596,7 +779,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
             </div>
 
             {/* Debug Log */}
-            {result.debug_log && result.debug_log.length > 0 && (
+            {result.debug_log && Array.isArray(result.debug_log) && result.debug_log.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-md font-medium">
@@ -640,8 +823,10 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
                       <SelectContent>
                         <SelectItem value="all">Все типы</SelectItem>
                         <SelectItem value="info">Информация</SelectItem>
-                        <SelectItem value="llm_call">LLM запрос</SelectItem>
                         <SelectItem value="llm_response">LLM ответ</SelectItem>
+                        <SelectItem value="prompts">Промпты</SelectItem>
+                        <SelectItem value="error">Ошибки</SelectItem>
+                        <SelectItem value="db_operation">База данных</SelectItem>
                       </SelectContent>
                     </Select>
                     <Select value={logFilterSuccess} onValueChange={setLogFilterSuccess}>
@@ -680,7 +865,79 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
                             </div>
                           </div>
                           <div className="text-xs bg-gray-50 p-2 rounded border">
-                            <JsonHighlighter data={log.data} />
+                            {log.step_type === 'prompts' ? (
+                              <div className="space-y-3">
+                                <div>
+                                  <div className="font-medium text-purple-700 mb-1">🤖 System Prompt:</div>
+                                  <div className="bg-purple-50 p-2 rounded text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                    {log.data?.system_prompt || 'N/A'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="font-medium text-blue-700 mb-1">👤 User Prompt:</div>
+                                  <div className="bg-blue-50 p-2 rounded text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                    {log.data?.user_prompt || 'N/A'}
+                                  </div>
+                                </div>
+                                {log.data?.model && (
+                                  <div className="text-gray-600">
+                                    <strong>Model:</strong> {log.data.model}
+                                  </div>
+                                )}
+                              </div>
+                            ) : log.step_type === 'llm_response' && log.data?.raw_response ? (
+                              <div className="space-y-2">
+                                <div className="font-medium text-green-700">📝 Raw LLM Response:</div>
+                                <div className="bg-green-50 p-2 rounded text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                  {log.data.raw_response}
+                                </div>
+                                <div className="text-xs text-gray-600 mt-1">
+                                  <JsonHighlighter data={log.data} />
+                                </div>
+                              </div>
+                            ) : log.step_type === 'error' ? (
+                              <div className="space-y-2">
+                                <div className="font-medium text-red-700">❌ Ошибка:</div>
+                                <div className="bg-red-50 border border-red-200 p-2 rounded text-xs">
+                                  <div className="font-medium">Сообщение:</div>
+                                  <div className="font-mono whitespace-pre-wrap mt-1">
+                                    {log.data?.error || log.data?.message || 'Неизвестная ошибка'}
+                                  </div>
+                                  {log.data?.details && (
+                                    <div className="mt-2">
+                                      <div className="font-medium">Детали:</div>
+                                      <div className="font-mono whitespace-pre-wrap mt-1 text-xs">
+                                        {JSON.stringify(log.data.details, null, 2)}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ) : log.step_type === 'db_operation' ? (
+                              <div className="space-y-2">
+                                <div className="font-medium text-green-700">💾 Операция с БД:</div>
+                                <div className="bg-green-50 border border-green-200 p-2 rounded text-xs">
+                                  <div className="font-medium">Операция: {log.data?.operation}</div>
+                                  {log.data?.scenarios_count && (
+                                    <div className="mt-1">Сценариев: {log.data.scenarios_count}</div>
+                                  )}
+                                  {log.data?.stage && (
+                                    <div className="mt-1">Этап: {log.data.stage}</div>
+                                  )}
+                                  {log.data?.post_id && (
+                                    <div className="mt-1">Пост: {log.data.post_id}</div>
+                                  )}
+                                  <div className="mt-2">
+                                    <div className="font-medium">Данные:</div>
+                                    <div className="font-mono whitespace-pre-wrap mt-1 text-xs max-h-32 overflow-y-auto">
+                                      {JSON.stringify(log.data.data || log.data, null, 2)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <JsonHighlighter data={log.data} />
+                            )}
                           </div>
                         </div>
                       ))
@@ -689,6 +946,35 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
                 </div>
               </div>
             )}
+
+            {/* Fallback: Show debug log info even if empty */}
+            {(!result.debug_log || !Array.isArray(result.debug_log) || result.debug_log.length === 0) && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
+                <h4 className="text-sm font-medium text-blue-800 mb-2">📋 Debug лог (пустой или отсутствует)</h4>
+                <div className="text-xs text-blue-700 space-y-1">
+                  <div>Debug log: {result.debug_log ? 'существует' : '❌ отсутствует'}</div>
+                  <div>Type: {typeof result.debug_log}</div>
+                  <div>Is Array: {Array.isArray(result.debug_log) ? '✅' : '❌'}</div>
+                  <div>Length: {result.debug_log?.length || 0}</div>
+                  {result.debug_log && !Array.isArray(result.debug_log) && (
+                    <div className="mt-2">
+                      <strong>Raw content:</strong>
+                      <pre className="mt-1 bg-white p-2 rounded text-xs overflow-auto max-h-32 border">
+                        {JSON.stringify(result.debug_log, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <h4 className="text-sm font-medium text-gray-800 mb-2">📊 Результаты тестирования</h4>
+            <div className="text-xs text-gray-600">
+              <div>Result state: {result ? 'установлен' : '❌ не установлен'}</div>
+              <div>Ожидание завершения теста...</div>
+            </div>
           </div>
         )}
 

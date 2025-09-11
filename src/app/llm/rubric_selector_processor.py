@@ -17,6 +17,7 @@ except ImportError:
 from .base_processor import BaseLLMProcessor, ProcessingResult
 from ..settings import settings
 from ..utils import setup_logger
+from ..prompts import prompt_manager
 
 # Настройка логирования
 logger = setup_logger(__name__)
@@ -27,8 +28,16 @@ class RubricSelectorProcessor(BaseLLMProcessor):
 
     def __init__(self):
         """Инициализирует процессор выбора рубрик."""
+        # Импортируем prompt_manager
+        from ..prompts import prompt_manager
+        self.prompt_manager = prompt_manager
+
+        # Получаем модель из настроек промпта
+        model_settings = self.prompt_manager.get_model_settings("rubric_selector_system")
+        model_name = model_settings.get('model', settings.rubric_model)
+
         super().__init__(
-            model_name="gpt-4o",
+            model_name=model_name,
             api_key=settings.openai_api_key
         )
 
@@ -72,10 +81,9 @@ class RubricSelectorProcessor(BaseLLMProcessor):
                 )
 
             # Получаем system и user промпты из базы данных
-            from ..prompts import prompt_manager
-            system_prompt = prompt_manager.get_system_prompt("rubric_selector_system", {})
+            system_prompt = self.prompt_manager.get_system_prompt("rubric_selector_system", {})
 
-            user_prompt = prompt_manager.get_user_prompt("rubric_selector_system", {
+            user_prompt = self.prompt_manager.get_user_prompt("rubric_selector_system", {
                 "post_text": post_text[:2000],
                 "analysis": str(analysis),
                 "views": input_data.get("views", 0),
@@ -85,6 +93,11 @@ class RubricSelectorProcessor(BaseLLMProcessor):
                 "available_rubrics": str(available_rubrics),
                 "available_formats": str(available_formats)
             })
+
+            # Debug: логируем промпты
+            logger.debug(f"🧪 RUBRIC PROMPT - System: {system_prompt}")
+            logger.debug(f"🧪 RUBRIC PROMPT - User: {user_prompt}")
+            logger.debug(f"🧪 RUBRIC INPUT DATA: post_text={post_text[:100]}..., analysis_keys={list(analysis.keys())}, rubrics_count={len(available_rubrics)}")
 
             # Выполняем запрос
             success, response, error = await self._make_request_with_retry(
@@ -110,6 +123,11 @@ class RubricSelectorProcessor(BaseLLMProcessor):
             result_text = response.choices[0].message.content
             tokens_used = self._calculate_tokens(user_prompt, result_text)
 
+            # Debug: логируем сырой ответ от LLM
+            logger.debug(f"🧪 RUBRIC RAW RESPONSE: {result_text}")
+            logger.debug(f"🧪 RUBRIC RESPONSE LENGTH: {len(result_text)} chars")
+            logger.debug(f"🧪 RUBRIC TOKENS USED: {tokens_used}")
+
             # Валидируем ответ по схеме
             schema = self.get_stage_schema("rubric_selection")
             success, validated_data, validation_error = self.validate_json_response(result_text, schema)
@@ -119,10 +137,11 @@ class RubricSelectorProcessor(BaseLLMProcessor):
                     success=True,
                     data={
                         **validated_data,
-                        "rubric_selector_model": "gpt-4o"
+                        "rubric_selector_model": self.model_name
                     },
                     tokens_used=tokens_used,
-                    processing_time=time.time() - start_time
+                    processing_time=time.time() - start_time,
+                    raw_response=result_text
                 )
             else:
                 logger.warning(f"Rubric selection validation failed: {validation_error}")
@@ -147,11 +166,12 @@ class RubricSelectorProcessor(BaseLLMProcessor):
                         success=True,
                         data={
                             **fallback_data,
-                            "rubric_selector_model": "gpt-4o",
+                            "rubric_selector_model": self.model_name,
                             "validation_warning": validation_error
                         },
                         tokens_used=tokens_used,
-                        processing_time=time.time() - start_time
+                        processing_time=time.time() - start_time,
+                        raw_response=result_text
                     )
 
                 except json.JSONDecodeError:
@@ -161,12 +181,13 @@ class RubricSelectorProcessor(BaseLLMProcessor):
                         success=True,
                         data={
                             "raw_response": result_text,
-                            "rubric_selector_model": "gpt-4o",
+                            "rubric_selector_model": self.model_name,
                             "parsing_error": "JSON parsing failed",
                             "validation_error": validation_error
                         },
                         tokens_used=tokens_used,
-                        processing_time=time.time() - start_time
+                        processing_time=time.time() - start_time,
+                        raw_response=result_text
                     )
 
         except Exception as e:
@@ -174,5 +195,6 @@ class RubricSelectorProcessor(BaseLLMProcessor):
             return ProcessingResult(
                 success=False,
                 error=f"Внутренняя ошибка: {str(e)}",
-                processing_time=time.time() - start_time
+                processing_time=time.time() - start_time,
+                raw_response=None
             )
