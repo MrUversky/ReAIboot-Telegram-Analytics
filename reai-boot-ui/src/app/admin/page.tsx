@@ -29,7 +29,8 @@ import {
   Zap,
   Target,
   BarChart3,
-  DollarSign
+  DollarSign,
+  AlertCircle
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { apiClient } from '@/lib/api'
@@ -85,6 +86,13 @@ export default function AdminPage() {
   const [showPricesModal, setShowPricesModal] = useState(false)
   const [priceReport, setPriceReport] = useState<any>(null)
   const [loadingPrices, setLoadingPrices] = useState(false)
+
+  // Data Cleanup state
+  const [showCleanupModal, setShowCleanupModal] = useState(false)
+  const [cleanupPreview, setCleanupPreview] = useState<any>(null)
+  const [cleanupDays, setCleanupDays] = useState(7)
+  const [cleanupConfirm, setCleanupConfirm] = useState('')
+  const [cleanupLoading, setCleanupLoading] = useState(false)
   const [authStep, setAuthStep] = useState<'phone' | 'code'>('phone')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
@@ -501,6 +509,40 @@ export default function AdminPage() {
     } catch (error) {
       console.error('Error calculating baseline:', error)
       alert('Ошибка при расчете базовых метрик')
+    }
+  }
+
+  // Data Cleanup functions
+  const handlePreviewCleanup = async () => {
+    try {
+      const preview = await apiClient.previewCleanup(cleanupDays)
+      setCleanupPreview(preview)
+    } catch (error) {
+      console.error('Error previewing cleanup:', error)
+      alert('Ошибка при предварительном просмотре очистки')
+    }
+  }
+
+  const handleExecuteCleanup = async () => {
+    if (cleanupConfirm !== 'DELETE') {
+      alert('Введите "DELETE" для подтверждения')
+      return
+    }
+
+    setCleanupLoading(true)
+    try {
+      const result = await apiClient.executeCleanup(cleanupDays, true)
+      alert(`✅ Очистка завершена!\n\nУдалено:\n• Постов: ${result.deleted_counts.posts}\n• Анализов: ${result.deleted_counts.post_analysis}\n• Сценариев: ${result.deleted_counts.scenarios}\n• Метрик: ${result.deleted_counts.post_metrics}`)
+      setShowCleanupModal(false)
+      setCleanupPreview(null)
+      setCleanupConfirm('')
+      // Обновить данные
+      loadAdminData()
+    } catch (error) {
+      console.error('Error executing cleanup:', error)
+      alert('Ошибка при выполнении очистки')
+    } finally {
+      setCleanupLoading(false)
     }
   }
 
@@ -1035,6 +1077,10 @@ export default function AdminPage() {
               <Button variant="outline" onClick={handleConfigureViral}>
                 <Zap className="w-4 h-4 mr-2" />
                 Viral Detection
+              </Button>
+              <Button variant="outline" onClick={() => setShowCleanupModal(true)}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Очистка данных
               </Button>
               <Button
                 variant={telegramStatus?.telegram_authorization_needed ? "default" : "outline"}
@@ -2652,6 +2698,170 @@ export default function AdminPage() {
                   <p className="text-gray-600">Не удалось загрузить данные о ценах</p>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Data Cleanup Modal */}
+      {showCleanupModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-red-600 flex items-center">
+                  <Trash2 className="w-6 h-6 mr-2" />
+                  Очистка данных
+                </h2>
+                <Button variant="outline" onClick={() => setShowCleanupModal(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Settings */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Настройки очистки</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="cleanupDays">Период очистки (дни)</Label>
+                        <Select
+                          value={cleanupDays.toString()}
+                          onValueChange={(value) => setCleanupDays(parseInt(value))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="1">1 день</SelectItem>
+                            <SelectItem value="3">3 дня</SelectItem>
+                            <SelectItem value="7">7 дней</SelectItem>
+                            <SelectItem value="14">14 дней</SelectItem>
+                            <SelectItem value="30">30 дней</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={handlePreviewCleanup}
+                      className="mt-4"
+                      variant="outline"
+                    >
+                      Предварительный просмотр
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                {/* Preview Results */}
+                {cleanupPreview && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-orange-600">Что будет удалено</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                        <div className="text-center p-4 bg-red-50 rounded-lg">
+                          <div className="text-2xl font-bold text-red-600">{cleanupPreview.summary.posts}</div>
+                          <div className="text-sm text-gray-600">Постов</div>
+                        </div>
+                        <div className="text-center p-4 bg-orange-50 rounded-lg">
+                          <div className="text-2xl font-bold text-orange-600">{cleanupPreview.summary.post_analysis}</div>
+                          <div className="text-sm text-gray-600">Анализов</div>
+                        </div>
+                        <div className="text-center p-4 bg-yellow-50 rounded-lg">
+                          <div className="text-2xl font-bold text-yellow-600">{cleanupPreview.summary.scenarios}</div>
+                          <div className="text-sm text-gray-600">Сценариев</div>
+                        </div>
+                        <div className="text-center p-4 bg-blue-50 rounded-lg">
+                          <div className="text-2xl font-bold text-blue-600">{cleanupPreview.summary.post_metrics}</div>
+                          <div className="text-sm text-gray-600">Метрик</div>
+                        </div>
+                      </div>
+
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                        <div className="flex">
+                          <AlertCircle className="w-5 h-5 text-yellow-400 mr-3 mt-0.5" />
+                          <div>
+                            <h3 className="text-sm font-medium text-yellow-800">
+                              Затронутые каналы ({cleanupPreview.summary.affected_channels})
+                            </h3>
+                            <p className="mt-1 text-sm text-yellow-700">
+                              {cleanupPreview.affected_channels.slice(0, 5).join(', ')}
+                              {cleanupPreview.affected_channels.length > 5 && ` и ещё ${cleanupPreview.affected_channels.length - 5}`}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                        <div className="flex">
+                          <AlertCircle className="w-5 h-5 text-red-400 mr-3 mt-0.5" />
+                          <div>
+                            <h3 className="text-sm font-medium text-red-800">
+                              ⚠️ Предупреждение
+                            </h3>
+                            <p className="mt-1 text-sm text-red-700">
+                              {cleanupPreview.warning}
+                              <br />
+                              Baseline метрики каналов будут помечены как устаревшие.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Confirmation */}
+                {cleanupPreview && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-red-600">Подтверждение удаления</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        <div>
+                          <Label htmlFor="confirmText">
+                            Введите <strong>DELETE</strong> для подтверждения:
+                          </Label>
+                          <Input
+                            id="confirmText"
+                            value={cleanupConfirm}
+                            onChange={(e) => setCleanupConfirm(e.target.value)}
+                            placeholder="DELETE"
+                            className="mt-2"
+                          />
+                        </div>
+
+                        <div className="flex gap-4">
+                          <Button
+                            onClick={() => setShowCleanupModal(false)}
+                            variant="outline"
+                            className="flex-1"
+                          >
+                            Отмена
+                          </Button>
+                          <Button
+                            onClick={handleExecuteCleanup}
+                            disabled={cleanupConfirm !== 'DELETE' || cleanupLoading}
+                            className="flex-1 bg-red-600 hover:bg-red-700"
+                          >
+                            {cleanupLoading ? (
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            ) : (
+                              <Trash2 className="w-4 h-4 mr-2" />
+                            )}
+                            Удалить данные
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
             </div>
           </div>
         </div>

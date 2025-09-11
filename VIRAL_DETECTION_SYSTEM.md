@@ -8,6 +8,7 @@
 
 - **Адаптивность**: Учитывает специфику каждого канала
 - **Статистическая обоснованность**: Использует Z-score и процентили
+- **Автоматическое обновление**: Базовые метрики обновляются периодически (по умолчанию раз в 7 дней)
 - **Экономия токенов**: Фильтрует 80-90% нерелевантных постов перед LLM
 - **Масштабируемость**: Работает для каналов любого размера
 
@@ -84,6 +85,44 @@ ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS
 
 ---
 
+## 🔄 Актуальный Pipeline системы
+
+### Полный цикл обработки:
+
+```
+1. ПАРСИНГ КАНАЛА
+   ↓
+2. ПРОВЕРКА BASELINE (нужно ли обновлять?)
+   ↓
+3. РАСЧЕТ/ОБНОВЛЕНИЕ BASELINE (если нужно)
+   ↓
+4. РАСЧЕТ VIRAL МЕТРИК для новых постов
+   ↓
+5. СОХРАНЕНИЕ МЕТРИК в БД
+   ↓
+6. ДОСТУПНОСТЬ МЕТРИК в UI
+```
+
+### Детальный процесс:
+
+**При парсинге канала (`/api/parsing/channel`):**
+1. Получение постов через Telegram API
+2. Сохранение постов в таблицу `posts` с ID: `f"{message_id}_{channel_username}"`
+3. Проверка необходимости обновления baseline (сравнение `last_calculated` с настройкой `baseline_update_days`)
+4. Если нужно → пересчет baseline на основе истории постов (30 дней)
+5. Расчет viral метрик для новых постов:
+   - Engagement Rate = (forwards×0.5 + reactions×0.3 + replies×0.2) / views
+   - Z-score = (engagement - среднее) / std_отклонение
+   - Median multiplier = engagement / медиана_канала
+   - Viral Score = 0.4×zscore + 0.4×множитель + 0.2×scale_factor
+6. Обновление метрик в БД через `update_post_viral_metrics()`
+
+**При просмотре в UI:**
+- Метрики загружаются из БД вместе с постами
+- Отображаются в карточках постов: viral_score, engagement_rate, zscore, median_multiplier
+
+---
+
 ## ⚙️ Математическая модель
 
 ### 1. Расчет Engagement Rate
@@ -155,8 +194,13 @@ viral_score = (zscore_component × 0.4) + (median_component × 0.4) + (scale_com
   },
   "baseline_calculation": {
     "history_days": 30,
-    "min_posts_for_baseline": 10,
+    "min_posts_for_baseline": 3,
     "outlier_removal_percentile": 95
+  },
+  "viral_calculation": {
+    "auto_calculate_viral": true,
+    "batch_size": 100,
+    "baseline_update_days": 7
   }
 }
 ```
@@ -195,14 +239,32 @@ def calculate_channel_baseline(channel_username, posts):
     clean_rates = remove_outliers(engagement_rates)
 
     # 3. Рассчитываем статистические показатели
-    return {
+    baseline = {
         'avg_engagement_rate': mean(clean_rates),
         'median_engagement_rate': median(clean_rates),
         'std_engagement_rate': std(clean_rates),
         'p75_engagement_rate': percentile75(clean_rates),
         'posts_analyzed': len(clean_rates),
-        'baseline_status': 'ready' if len(clean_rates) >= 10 else 'learning'
+        'baseline_status': 'ready' if len(clean_rates) >= 3 else 'learning',
+        'last_calculated': datetime.now().isoformat()
     }
+
+    # 4. Сохраняем в БД с меткой времени
+    save_baseline_to_db(channel_username, baseline)
+    return baseline
+
+def needs_baseline_update(channel_username):
+    """Проверяет необходимость обновления baseline (раз в 7 дней по умолчанию)"""
+    baseline = get_baseline_from_db(channel_username)
+    if not baseline:
+        return True
+
+    last_update = datetime.fromisoformat(baseline['last_calculated'])
+    days_since_update = (datetime.now() - last_update).days
+
+    # Настройка периода обновления из system_settings.viral_calculation.baseline_update_days
+    update_interval_days = get_system_setting('viral_calculation')['baseline_update_days']
+    return days_since_update >= update_interval_days
 ```
 
 ### Этап 2: Анализ поста на "залетевшесть"
@@ -383,6 +445,8 @@ weekly_stats = {
 ## 🔮 Будущие улучшения
 
 ### Короткосрочные (1-2 недели):
+- [x] Периодическое обновление baseline (раз в 7 дней)
+- [x] Исправление отображения метрик после парсинга
 - [ ] Добавление категорий каналов с разными настройками
 - [ ] Временные тренды (часы, дни недели)
 - [ ] Мониторинг качества фильтрации

@@ -548,10 +548,17 @@ class TelegramAnalyzer:
         # Проверяем наличие медиа
         has_media = bool(message.media)
         
+        # Формируем ID поста (такой же как в save_posts_batch)
+        channel_username = channel_info.get("username", "")
+        if channel_username and not channel_username.startswith('@'):
+            channel_username = f"@{channel_username}"
+        post_id = f"{message.id}_{channel_username}"
+
         # Форматируем сообщение
         message_data = {
+            "id": post_id,  # Добавляем ID для обновления метрик
             "channel_title": channel_info.get("title"),
-            "channel_username": channel_info.get("username"),
+            "channel_username": channel_username,  # Уже с @
             "participants_count": channel_info.get("participants_count", 0),
             "message_id": message.id,
             "date": message.date.isoformat(),

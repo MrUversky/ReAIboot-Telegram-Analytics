@@ -7,6 +7,7 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import numpy as np
+import pytz
 
 from .settings import settings
 from .utils import setup_logger
@@ -92,9 +93,16 @@ class ChannelBaselineAnalyzer:
                 "outlier_removal_percentile": 95
             }
 
+            viral_calculation = self.supabase.get_system_setting('viral_calculation') or {
+                "auto_calculate_viral": True,
+                "batch_size": 100,
+                "baseline_update_days": 7
+            }
+
             return {
                 'viral_weights': viral_weights,
-                'baseline_calculation': baseline_calculation
+                'baseline_calculation': baseline_calculation,
+                'viral_calculation': viral_calculation
             }
         except Exception as e:
             logger.warning(f"Не удалось загрузить настройки из БД: {e}. Используем значения по умолчанию.")
@@ -348,3 +356,36 @@ class ChannelBaselineAnalyzer:
             baseline.posts_analyzed >= self.settings['baseline_calculation']['min_posts_for_baseline'] and
             baseline.median_engagement_rate > 0
         )
+
+    def needs_baseline_update(self, channel_username: str, max_age_days: int = None) -> bool:
+        """
+        Проверяет, нужно ли обновить базовые метрики канала.
+
+        Args:
+            channel_username: Username канала
+            max_age_days: Максимальный возраст метрик в днях (если None - берем из настроек)
+
+        Returns:
+            True если нужно обновить
+        """
+        baseline = self.get_channel_baseline(channel_username)
+        if not baseline:
+            return True  # Нет метрик - нужно создать
+
+        if not baseline.last_calculated:
+            return True  # Нет даты - нужно обновить
+
+        # Используем настройки из БД или переданное значение
+        if max_age_days is None:
+            max_age_days = self.settings.get('viral_calculation', {}).get('baseline_update_days', 7)
+
+        # Проверяем возраст метрик (учитываем часовые пояса)
+        now = datetime.now(pytz.UTC)
+        if baseline.last_calculated.tzinfo is None:
+            # Если baseline.last_calculated не имеет timezone, добавляем UTC
+            last_calc_utc = pytz.UTC.localize(baseline.last_calculated)
+        else:
+            last_calc_utc = baseline.last_calculated
+
+        age_days = (now - last_calc_utc).days
+        return age_days >= max_age_days
