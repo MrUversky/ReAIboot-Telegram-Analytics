@@ -2619,39 +2619,64 @@ async def test_pipeline_sandbox(request: Dict[str, Any]):
 
         logger.info(f"🧪 Запуск тестирования pipeline в песочнице для поста {post_data.get('message_id', 'unknown')}")
 
-        # Пока возвращаем заглушку - полная реализация будет в следующем этапе
-        return {
-            "success": True,
-            "message": "Песочница инициализирована",
-            "post_id": post_data.get('id') or f"{post_data.get('message_id', 'unknown')}_{post_data.get('channel_username', 'unknown')}",
-            "debug_mode": options.get('debug_mode', True),
-            "steps": [
-                {
-                    "step": 1,
-                    "name": "post_validation",
-                    "status": "pending",
-                    "description": "Валидация данных поста"
-                },
-                {
-                    "step": 2,
-                    "name": "analysis",
-                    "status": "pending",
-                    "description": "LLM анализ поста"
-                },
-                {
-                    "step": 3,
-                    "name": "scenario_generation",
-                    "status": "pending",
-                    "description": "Генерация сценариев"
-                },
-                {
-                    "step": 4,
-                    "name": "database_save",
-                    "status": "pending",
-                    "description": "Сохранение результатов"
-                }
-            ]
-        }
+        # Создаем новый экземпляр оркестратора для песочницы
+        orchestrator = LLMOrchestrator()
+
+        # Включаем debug режим
+        session_id = f"sandbox_{post_data.get('message_id', 'unknown')}_{int(asyncio.get_event_loop().time())}"
+        orchestrator.enable_debug_mode(session_id)
+
+        try:
+            # Запускаем pipeline с тем же методом, что и на продакшене
+            result = await orchestrator.process_post_enhanced(
+                post_data=post_data,
+                skip_filter=False,  # Всегда выполняем фильтрацию
+                skip_analysis=False,  # Всегда выполняем анализ
+                skip_rubric_selection=False  # Всегда выполняем выбор рубрик
+            )
+
+            # Получаем детальный debug лог
+            debug_log = orchestrator.get_debug_log()
+
+            # Форматируем результат для песочницы
+            sandbox_result = {
+                "success": result.overall_success,
+                "post_id": result.post_id,
+                "session_id": session_id,
+                "total_tokens": result.total_tokens,
+                "total_time": result.total_time,
+                "error": result.error,
+                "debug_log": debug_log,
+                "stages": [
+                    {
+                        "step": i + 1,
+                        "name": stage.stage_name,
+                        "status": "completed" if stage.success else "failed",
+                        "description": f"{'✅' if stage.success else '❌'} {stage.stage_name}",
+                        "success": stage.success,
+                        "tokens_used": stage.tokens_used,
+                        "processing_time": stage.processing_time,
+                        "data": stage.data,
+                        "error": stage.error
+                    }
+                    for i, stage in enumerate(result.stages)
+                ],
+                "final_result": result.final_data
+            }
+
+            logger.info(f"🧪 Песочница завершила тестирование поста {result.post_id}: {result.overall_success}")
+            return sandbox_result
+
+        except Exception as e:
+            logger.error(f"Ошибка в песочнице: {e}")
+            return {
+                "success": False,
+                "post_id": post_data.get('id') or f"{post_data.get('message_id', 'unknown')}_{post_data.get('channel_username', 'unknown')}",
+                "session_id": session_id,
+                "error": str(e),
+                "debug_log": orchestrator.get_debug_log(),
+                "stages": []
+            }
 
     except HTTPException:
         raise

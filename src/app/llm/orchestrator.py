@@ -62,7 +62,44 @@ class LLMOrchestrator:
             "generator": self.generator_processor.is_processor_available()
         }
 
+        # Debug режим
+        self.debug_mode = False
+        self.debug_log = []
+        self.current_session_id = None
+
         logger.info(f"Доступность процессоров: {self.available_processors}")
+
+    def enable_debug_mode(self, session_id: Optional[str] = None):
+        """Включает debug режим для детального логирования."""
+        self.debug_mode = True
+        self.debug_log = []
+        self.current_session_id = session_id or f"debug_{int(asyncio.get_event_loop().time())}"
+        logger.info(f"🧪 Debug режим включен для сессии {self.current_session_id}")
+
+    def disable_debug_mode(self):
+        """Выключает debug режим."""
+        self.debug_mode = False
+        logger.info(f"🧪 Debug режим выключен")
+
+    def get_debug_log(self) -> List[Dict[str, Any]]:
+        """Возвращает лог debug сессии."""
+        return self.debug_log.copy()
+
+    def _log_debug_step(self, step_name: str, step_type: str, data: Dict[str, Any]):
+        """Логирует шаг в debug режиме."""
+        if not self.debug_mode:
+            return
+
+        debug_entry = {
+            "session_id": self.current_session_id,
+            "timestamp": asyncio.get_event_loop().time(),
+            "step_name": step_name,
+            "step_type": step_type,
+            "data": data
+        }
+
+        self.debug_log.append(debug_entry)
+        logger.debug(f"🧪 Debug [{step_type}]: {step_name}")
 
     async def process_post_enhanced(
         self,
@@ -88,6 +125,15 @@ class LLMOrchestrator:
         stages = []
         total_tokens = 0
 
+        # Debug: Логируем начало обработки
+        self._log_debug_step("pipeline_start", "info", {
+            "post_id": post_id,
+            "input_data": post_data,
+            "skip_filter": skip_filter,
+            "skip_analysis": skip_analysis,
+            "skip_rubric_selection": skip_rubric_selection
+        })
+
         logger.info(f"Начинаем 4-этапную обработку поста {post_id}")
 
         try:
@@ -95,9 +141,23 @@ class LLMOrchestrator:
             filter_result = None
             if not skip_filter:
                 logger.info(f"Этап 1: Фильтрация поста {post_id}")
+
+                # Debug: Логируем начало фильтрации
+                self._log_debug_step("filter_start", "llm_call", {
+                    "input_data": post_data,
+                    "processor": "FilterProcessor"
+                })
+
                 filter_result = await self.filter_processor.process(post_data)
-                logger.info(f"Этап 1: Фильтрация поста {post_id}")
-                filter_result = await self.filter_processor.process(post_data)
+
+                # Debug: Логируем результат фильтрации
+                self._log_debug_step("filter_complete", "llm_response", {
+                    "success": filter_result.success,
+                    "result": filter_result.data,
+                    "error": filter_result.error,
+                    "tokens_used": filter_result.tokens_used,
+                    "processing_time": filter_result.processing_time
+                })
 
                 stages.append(ProcessingStage(
                     stage_name="filter",
@@ -137,9 +197,25 @@ class LLMOrchestrator:
             if not skip_analysis:
                 logger.info(f"Этап 2: Анализ поста {post_id}")
                 filter_score = filter_result.data.get("score", 0) if filter_result else 0
+
+                # Debug: Логируем начало анализа
+                self._log_debug_step("analysis_start", "llm_call", {
+                    "input_data": {**post_data, "filter_score": filter_score},
+                    "processor": "AnalysisProcessor"
+                })
+
                 analysis_result = await self.analysis_processor.process({
                     **post_data,
                     "filter_score": filter_score
+                })
+
+                # Debug: Логируем результат анализа
+                self._log_debug_step("analysis_complete", "llm_response", {
+                    "success": analysis_result.success,
+                    "result": analysis_result.data,
+                    "error": analysis_result.error,
+                    "tokens_used": analysis_result.tokens_used,
+                    "processing_time": analysis_result.processing_time
                 })
 
                 stages.append(ProcessingStage(
