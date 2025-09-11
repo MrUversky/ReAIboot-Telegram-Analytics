@@ -3,7 +3,7 @@
 Предоставляет REST API для всех функций системы.
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -43,6 +43,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Middleware для логирования API запросов
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Middleware для логирования всех HTTP запросов."""
+    import time
+
+    start_time = time.time()
+    method = request.method
+    url = str(request.url)
+
+    # Логируем только API запросы
+    if "/api/" in url:
+        try:
+            # Безопасно получаем информацию о клиенте
+            client_info = "unknown"
+            if hasattr(request, 'client') and request.client:
+                client_info = getattr(request.client, 'host', 'unknown')
+
+            path = url.replace(str(request.base_url), '') if hasattr(request, 'base_url') else url
+            logger.info(f"📨 API REQUEST: {method} {path} from {client_info}")
+        except Exception as e:
+            logger.info(f"📨 API REQUEST: {method} {url}")
+
+    response = await call_next(request)
+    process_time = time.time() - start_time
+
+    # Логируем ответ
+    if "/api/" in url:
+        logger.info(f"📨 API RESPONSE: {response.status_code} in {process_time:.2f}s")
+
+    return response
 
 # Глобальные объекты
 orchestrator = LLMOrchestrator()
@@ -2618,6 +2650,8 @@ async def test_pipeline_sandbox(request: Dict[str, Any]):
             raise HTTPException(status_code=400, detail="Не переданы данные поста")
 
         logger.info(f"🧪 Запуск тестирования pipeline в песочнице для поста {post_data.get('message_id', 'unknown')}")
+        logger.debug(f"🧪 SANDBOX INPUT: {post_data}")
+        logger.debug(f"🧪 SANDBOX OPTIONS: {options}")
 
         # Создаем новый экземпляр оркестратора для песочницы
         orchestrator = LLMOrchestrator()
@@ -2713,11 +2747,12 @@ async def test_pipeline_sandbox(request: Dict[str, Any]):
             }
 
             logger.info(f"🧪 Песочница завершила тестирование поста {result.post_id}: {result.overall_success}")
+            logger.debug(f"🧪 SANDBOX OUTPUT: success={sandbox_result['success']}, stages={len(sandbox_result['stages'])}, tokens={sandbox_result['total_tokens']}")
             return sandbox_result
 
         except Exception as e:
             logger.error(f"Ошибка в песочнице: {e}")
-            return {
+            error_result = {
                 "success": False,
                 "post_id": post_data.get('id') or f"{post_data.get('message_id', 'unknown')}_{post_data.get('channel_username', 'unknown')}",
                 "session_id": session_id,
@@ -2725,6 +2760,8 @@ async def test_pipeline_sandbox(request: Dict[str, Any]):
                 "debug_log": orchestrator.get_debug_log(),
                 "stages": []
             }
+            logger.debug(f"🧪 SANDBOX ERROR OUTPUT: {error_result}")
+            return error_result
 
     except HTTPException:
         raise
@@ -2742,6 +2779,7 @@ async def get_sandbox_posts(limit: int = 50, offset: int = 0):
     - **offset**: Смещение для пагинации (по умолчанию 0)
     """
     try:
+        logger.info(f"🧪 SANDBOX: Запрос списка постов (limit={limit}, offset={offset})")
         # Получаем посты из базы данных
         posts_result = supabase_manager.client.table('posts').select(
             'id', 'message_id', 'channel_username', 'channel_title',
@@ -2770,6 +2808,7 @@ async def get_sandbox_posts(limit: int = 50, offset: int = 0):
             }
             posts.append(formatted_post)
 
+        logger.info(f"🧪 SANDBOX: Успешно возвращено {len(posts)} постов")
         return {
             "posts": posts,
             "total": len(posts),
@@ -2790,6 +2829,7 @@ async def get_sandbox_post(post_id: str):
     - **post_id**: ID поста в формате message_id_channel_username
     """
     try:
+        logger.info(f"🧪 SANDBOX: Запрос поста {post_id}")
         # Разбираем post_id
         if '_' not in post_id:
             raise HTTPException(status_code=400, detail="Некорректный формат post_id")
@@ -2828,6 +2868,7 @@ async def get_sandbox_post(post_id: str):
             'created_at': post.get('created_at')
         }
 
+        logger.info(f"🧪 SANDBOX: Успешно возвращен пост {post_id}")
         return {"post": formatted_post}
 
     except HTTPException:
