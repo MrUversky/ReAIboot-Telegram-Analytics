@@ -91,6 +91,10 @@ class FilterProcessor(BaseLLMProcessor):
                 "channel_title": channel_title
             })
 
+            # Debug: логируем промпты
+            logger.debug(f"🧪 FILTER PROMPT - System: {system_prompt[:200]}...")
+            logger.debug(f"🧪 FILTER PROMPT - User: {user_prompt[:200]}...")
+
             # Выполняем запрос
             success, response, error = await self._make_request_with_retry(
                 lambda: self.client.chat.completions.create(
@@ -115,6 +119,10 @@ class FilterProcessor(BaseLLMProcessor):
             # Парсим и валидируем ответ
             result_text = response.choices[0].message.content
             tokens_used = self._calculate_tokens(user_prompt, result_text)
+
+            # Debug: логируем сырой ответ от LLM
+            logger.debug(f"🧪 FILTER RAW RESPONSE: {result_text[:300]}...")
+            logger.debug(f"🧪 FILTER RESPONSE LENGTH: {len(result_text)} chars")
 
             # Валидируем ответ по схеме
             schema = self.get_stage_schema("filter")

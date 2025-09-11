@@ -88,6 +88,10 @@ class AnalysisProcessor(BaseLLMProcessor):
                 "score": score
             })
 
+            # Debug: логируем промпты
+            logger.debug(f"🧪 ANALYSIS PROMPT - System: {system_prompt[:200]}...")
+            logger.debug(f"🧪 ANALYSIS PROMPT - User: {user_prompt[:200]}...")
+
             # Выполняем запрос к Claude
             success, response, error = await self._make_request_with_retry(
                 lambda: self.client.messages.create(
@@ -112,6 +116,10 @@ class AnalysisProcessor(BaseLLMProcessor):
             # Парсим и валидируем ответ
             result_text = response.content[0].text
             tokens_used = self._calculate_tokens(user_prompt, result_text)
+
+            # Debug: логируем сырой ответ от LLM
+            logger.debug(f"🧪 ANALYSIS RAW RESPONSE: {result_text[:500]}...")
+            logger.debug(f"🧪 ANALYSIS RESPONSE LENGTH: {len(result_text)} chars")
 
             # Валидируем ответ по схеме
             schema = self.get_stage_schema("analysis")
