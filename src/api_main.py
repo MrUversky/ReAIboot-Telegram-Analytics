@@ -877,7 +877,8 @@ async def update_prompt_db(prompt_id: int, prompt_data: Dict[str, Any]):
         }
 
         # Добавляем только переданные поля
-        for field in ['name', 'description', 'prompt_type', 'content', 'model', 'temperature', 'max_tokens', 'is_active']:
+        for field in ['name', 'description', 'prompt_type', 'content', 'system_prompt', 'user_prompt',
+                      'variables', 'category', 'model', 'temperature', 'max_tokens', 'is_active']:
             if field in prompt_data:
                 update_data[field] = prompt_data[field]
 
@@ -1003,12 +1004,21 @@ async def create_prompt(prompt_data: Dict[str, Any]):
         user_id = user.user.id if user.user else None
 
         # Создаем промпт в базе данных с новой структурой
+        # Поддерживаем как старую структуру (content), так и новую (system_prompt + user_prompt)
+        content = prompt_data.get('content') or prompt_data.get('system_prompt', '')
+        if prompt_data.get('user_prompt'):
+            if content:
+                content += '\n\n'
+            content += prompt_data.get('user_prompt', '')
+
         prompt_record = {
             'name': prompt_data['name'],
             'description': prompt_data.get('description', ''),
             'prompt_type': prompt_data.get('prompt_type', 'custom'),
             'category': prompt_data.get('category', 'general'),
-            'content': prompt_data['content'],
+            'content': content,  # Объединяем system_prompt и user_prompt или используем content
+            'system_prompt': prompt_data.get('system_prompt', ''),  # Новые поля
+            'user_prompt': prompt_data.get('user_prompt', ''),      # Новые поля
             'variables': prompt_data.get('variables', {}),
             'model': prompt_data.get('model', 'gpt-4o-mini'),  # Старые поля для совместимости
             'temperature': prompt_data.get('temperature', 0.7),
@@ -1048,8 +1058,25 @@ async def update_prompt_db(prompt_id: int, prompt_data: Dict[str, Any]):
             'updated_at': datetime.now().isoformat()
         }
 
-        # Добавляем только переданные поля
-        for field in ['name', 'description', 'prompt_type', 'category', 'content', 'variables', 'model_settings', 'is_active', 'version']:
+        # Поддерживаем как старую структуру (content), так и новую (system_prompt + user_prompt)
+        if 'system_prompt' in prompt_data or 'user_prompt' in prompt_data:
+            # Если переданы новые поля, обновляем content на их основе
+            system_prompt = prompt_data.get('system_prompt', '')
+            user_prompt = prompt_data.get('user_prompt', '')
+            content = system_prompt
+            if user_prompt:
+                if content:
+                    content += '\n\n'
+                content += user_prompt
+            update_data['content'] = content
+            update_data['system_prompt'] = system_prompt
+            update_data['user_prompt'] = user_prompt
+        elif 'content' in prompt_data:
+            # Если передано старое поле content, используем его
+            update_data['content'] = prompt_data['content']
+
+        # Добавляем остальные поля
+        for field in ['name', 'description', 'prompt_type', 'category', 'variables', 'model_settings', 'is_active', 'version']:
             if field in prompt_data:
                 update_data[field] = prompt_data[field]
 
