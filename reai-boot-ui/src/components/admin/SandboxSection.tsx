@@ -81,7 +81,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
 
     setLoading(true)
     try {
-      const response = await fetch('/api/sandbox/test-pipeline', {
+      const response = await fetch('http://localhost:8000/api/sandbox/test-pipeline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -200,7 +200,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
   const loadAvailablePosts = async () => {
     setLoadingPosts(true)
     try {
-      const response = await fetch('/api/sandbox/posts?limit=100')
+      const response = await fetch('http://localhost:8000/api/sandbox/posts?limit=100')
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
@@ -222,7 +222,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = () => {
     }
 
     try {
-      const response = await fetch(`/api/sandbox/post/${postId}`)
+      const response = await fetch(`http://localhost:8000/api/sandbox/post/${postId}`)
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
