@@ -58,3 +58,83 @@ Location: Unknown
 ---
 
 *Сгенерировано автоматически: 2025-09-13 16:04:54*
+
+
+## Delete Channel
+
+**Эндпоинт:** `DELETE /api/channels/{channel_id}`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта delete_channel.
+
+### Детали реализации
+```
+Function: delete_channel
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-13 16:07:52*
+
+
+## Update Channel Settings
+
+**Эндпоинт:** `PUT /api/channels/{channel_id}`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта update_channel_settings.
+
+### Детали реализации
+```
+Function: update_channel_settings
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-13 16:10:20*
+
+
+## Get Parsing Session Status
+
+**Эндпоинт:** `GET /api/parsing/session/{session_id}`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта get_parsing_session_status.
+
+### Детали реализации
+```
+Function: get_parsing_session_status
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-13 16:17:18*
+
+
+## Parse Multiple Channels
+
+**Эндпоинт:** `POST /api/parsing/bulk`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта parse_multiple_channels.
+
+### Детали реализации
+```
+Function: parse_multiple_channels
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-13 16:21:20*

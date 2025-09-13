@@ -54,10 +54,11 @@ class DocumentationUpdate:
 class DocumentationAgent:
     """Main class for documentation updates"""
 
-    def __init__(self, project_root: str):
+    def __init__(self, project_root: str, force_ai: bool = False):
         self.project_root = Path(project_root)
         self.docs_root = self.project_root / "docs"
         self.api_docs_root = self.docs_root / "technical" / "api" / "endpoints"
+        self.force_ai = force_ai
 
         # Performance metrics
         self.metrics = {
@@ -669,7 +670,7 @@ Location: {details.split('Location: ')[1] if 'Location: ' in details else 'Unkno
                 current_content = f.read()
 
             # Check if component already documented
-            if f"### {component_name}" in current_content:
+            if f"### {component_name}" in current_content and not self.force_ai:
                 logger.info(f"Component {component_name} already documented")
                 return None
 
@@ -865,12 +866,12 @@ Frontend (Next.js) <-> API (FastAPI) <-> LLM Services <-> Database (Supabase)
 
             client = openai.Client(api_key=api_key)
 
-            # Read file content for context
+            # Extract relevant context for AI analysis
             try:
-                with open(self.project_root / file_path, "r", encoding="utf-8") as f:
-                    file_content = f.read()[:2000]  # First 2000 chars for context
-            except:
-                file_content = "File content not available"
+                file_content = self._extract_component_context(file_path, component_name, component_type)
+            except Exception as e:
+                logger.warning(f"Failed to extract context for {component_name}: {e}")
+                file_content = f"File: {file_path}\nComponent: {component_name}\nType: {component_type}\nContext extraction failed."
 
             prompt = f"""
             Проанализируй этот компонент системы ReAIboot и создай краткое описание на русском языке.
@@ -893,9 +894,9 @@ Frontend (Next.js) <-> API (FastAPI) <-> LLM Services <-> Database (Supabase)
             """
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=500,
+                max_tokens=400,  # Reduced from 500
                 temperature=0.3,
             )
 
@@ -913,6 +914,115 @@ Frontend (Next.js) <-> API (FastAPI) <-> LLM Services <-> Database (Supabase)
         except Exception as e:
             logger.warning(f"Failed to generate AI description: {e}")
             return None
+
+    def _extract_component_context(self, file_path: str, component_name: str, component_type: str) -> str:
+        """Extract relevant context for AI analysis without sending entire file"""
+        try:
+            with open(self.project_root / file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except:
+            return f"Could not read file: {file_path}"
+
+        lines = content.split('\n')
+        context_parts = []
+
+        # Add file header info
+        context_parts.append(f"File: {file_path}")
+        context_parts.append(f"Component: {component_name} ({component_type})")
+
+        # Extract imports (first 10 lines typically)
+        imports = []
+        for line in lines[:20]:  # Check first 20 lines for imports
+            line = line.strip()
+            if line.startswith(('import ', 'from ')) and not line.startswith('from typing'):
+                imports.append(line)
+            if len(imports) >= 5:  # Limit imports
+                break
+        if imports:
+            context_parts.append("\nKey imports:")
+            context_parts.extend(imports[:5])
+
+        # Find component definition and extract docstring + method signatures
+        in_component = False
+        component_start = -1
+        brace_count = 0
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+
+            # Find component start
+            if not in_component:
+                if component_type == "class" and stripped.startswith(f"class {component_name}"):
+                    in_component = True
+                    component_start = i
+                    # Extract class docstring
+                    docstring = self._extract_docstring(lines, i)
+                    if docstring:
+                        context_parts.append(f"\nClass docstring:\n{docstring}")
+                elif component_type == "function" and (stripped.startswith(f"def {component_name}") or stripped.startswith(f"async def {component_name}")):
+                    in_component = True
+                    component_start = i
+                    # Extract function docstring
+                    docstring = self._extract_docstring(lines, i)
+                    if docstring:
+                        context_parts.append(f"\nFunction docstring:\n{docstring}")
+                    # For functions, also add the signature
+                    context_parts.append(f"\nFunction signature:\n{line}")
+                    break  # Functions are simpler, just signature + docstring
+
+            # For classes, extract method signatures
+            elif component_type == "class" and in_component:
+                if stripped.startswith(('def ', 'async def ')) and not stripped.startswith('    ') and brace_count == 0:
+                    # This is a method definition
+                    method_name = stripped.split('(')[0].replace('def ', '').replace('async def ', '')
+                    context_parts.append(f"\nMethod: {method_name}")
+                    # Extract method docstring
+                    method_docstring = self._extract_docstring(lines, i)
+                    if method_docstring:
+                        context_parts.append(f"  Docstring: {method_docstring[:100]}...")
+
+                # Track braces for nested structures
+                brace_count += stripped.count('{') - stripped.count('}')
+                if brace_count < 0:  # End of class
+                    break
+
+        # Limit total context length
+        full_context = '\n'.join(context_parts)
+        if len(full_context) > 1500:  # Reasonable limit
+            full_context = full_context[:1500] + "\n\n[Context truncated for length]"
+
+        return full_context
+
+    def _extract_docstring(self, lines: List[str], start_idx: int) -> str:
+        """Extract docstring starting from given line index"""
+        if start_idx + 1 >= len(lines):
+            return ""
+
+        # Look for triple quotes
+        line = lines[start_idx + 1].strip()
+        if line.startswith('"""') or line.startswith("'''"):
+            quote_type = '"""' if line.startswith('"""') else "'''"
+            docstring_lines = []
+
+            # First line
+            first_line = line.replace(quote_type, '').strip()
+            if first_line:
+                docstring_lines.append(first_line)
+
+            # Continue until closing quotes
+            for i in range(start_idx + 2, len(lines)):
+                line = lines[i]
+                if quote_type in line:
+                    # Last line
+                    last_part = line.split(quote_type)[0].strip()
+                    if last_part:
+                        docstring_lines.append(last_part)
+                    break
+                else:
+                    docstring_lines.append(line.strip())
+
+            return '\n'.join(docstring_lines)
+        return ""
 
     def _generate_frontend_docs(
         self, change: CodeChange
@@ -1312,6 +1422,11 @@ def main():
         action="store_true",
         help="Show what would be updated without applying",
     )
+    parser.add_argument(
+        "--force-ai",
+        action="store_true",
+        help="Force AI regeneration for all components (expensive)",
+    )
 
     args = parser.parse_args()
 
@@ -1319,7 +1434,7 @@ def main():
     script_dir = Path(__file__).parent.parent
     project_root = script_dir
 
-    agent = DocumentationAgent(str(project_root))
+    agent = DocumentationAgent(str(project_root), force_ai=args.force_ai)
 
     if args.all:
         # Analyze all Python files
