@@ -5,16 +5,17 @@ Documentation Pre-commit Check Script
 Validates documentation before commits and suggests updates.
 """
 
-import os
-import sys
-import re
 import json
-from pathlib import Path
-from typing import Dict, List, Tuple, Optional
 import logging
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
 
 class DocumentationValidator:
     """Validates documentation quality and consistency"""
@@ -60,7 +61,7 @@ class DocumentationValidator:
             "technical/api/endpoints/sandbox.md",
             "business/overview.md",
             "business/audience.md",
-            "user-guides/getting-started.md"
+            "user-guides/getting-started.md",
         ]
 
         for file_path in required_files:
@@ -70,14 +71,16 @@ class DocumentationValidator:
 
     def _validate_api_documentation(self):
         """Validate API documentation completeness"""
-        api_files = list((self.docs_root / "technical" / "api" / "endpoints").glob("*.md"))
+        api_files = list(
+            (self.docs_root / "technical" / "api" / "endpoints").glob("*.md")
+        )
 
         for api_file in api_files:
             self._validate_single_api_file(api_file)
 
     def _validate_single_api_file(self, file_path: Path):
         """Validate single API documentation file"""
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
 
         # Check for required sections
@@ -86,12 +89,14 @@ class DocumentationValidator:
             r"\*\*Аутентификация:\*\*",
             r"### Описание",
             r"### Пример запроса",
-            r"### Пример ответа"
+            r"### Пример ответа",
         ]
 
         for pattern in required_patterns:
             if not re.search(pattern, content, re.MULTILINE):
-                self.warnings.append(f"Missing required section in {file_path.name}: {pattern}")
+                self.warnings.append(
+                    f"Missing required section in {file_path.name}: {pattern}"
+                )
 
     def _validate_cross_references(self):
         """Validate cross-references between documents"""
@@ -103,21 +108,21 @@ class DocumentationValidator:
         md_files = list(self.docs_root.glob("**/*.md"))
 
         for md_file in md_files:
-            with open(md_file, 'r', encoding='utf-8') as f:
+            with open(md_file, "r", encoding="utf-8") as f:
                 content = f.read()
 
             # Check for common Markdown issues
             issues = []
 
             # Unclosed code blocks
-            code_blocks = re.findall(r'```', content)
+            code_blocks = re.findall(r"```", content)
             if len(code_blocks) % 2 != 0:
                 issues.append("Unclosed code block")
 
             # Broken links
-            links = re.findall(r'\[([^\]]+)\]\(([^)]+)\)', content)
+            links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", content)
             for link_text, link_url in links:
-                if not link_url.startswith(('http', '/', '#')):
+                if not link_url.startswith(("http", "/", "#")):
                     # Check if relative link exists
                     link_path = (md_file.parent / link_url).resolve()
                     if not link_path.exists():
@@ -131,18 +136,18 @@ class DocumentationValidator:
         md_files = list(self.docs_root.glob("**/*.md"))
 
         for md_file in md_files:
-            with open(md_file, 'r', encoding='utf-8') as f:
+            with open(md_file, "r", encoding="utf-8") as f:
                 content = f.read()
 
             # Find code blocks
-            code_blocks = re.findall(r'```(\w+)?\n(.*?)\n```', content, re.DOTALL)
+            code_blocks = re.findall(r"```(\w+)?\n(.*?)\n```", content, re.DOTALL)
 
             for lang, code in code_blocks:
-                if lang == 'json':
+                if lang == "json":
                     self._validate_json_code(code, md_file.name)
-                elif lang == 'python':
+                elif lang == "python":
                     self._validate_python_code(code, md_file.name)
-                elif lang == 'bash':
+                elif lang == "bash":
                     self._validate_bash_code(code, md_file.name)
 
     def _validate_json_code(self, code: str, file_name: str):
@@ -156,20 +161,23 @@ class DocumentationValidator:
         """Validate Python code blocks"""
         # Basic syntax check
         try:
-            compile(code, '<string>', 'exec')
+            compile(code, "<string>", "exec")
         except SyntaxError as e:
             self.warnings.append(f"{file_name}: Invalid Python syntax: {e}")
 
     def _validate_bash_code(self, code: str, file_name: str):
         """Validate Bash code blocks"""
         # Check for common bash issues
-        lines = code.strip().split('\n')
+        lines = code.strip().split("\n")
         for line in lines:
             line = line.strip()
-            if line.startswith('curl') and ' -d ' in line:
+            if line.startswith("curl") and " -d " in line:
                 # Check if data is properly quoted
                 if not re.search(r'-d\s+[\'"\{]', line):
-                    self.warnings.append(f"{file_name}: Unquoted curl data in: {line[:50]}...")
+                    self.warnings.append(
+                        f"{file_name}: Unquoted curl data in: {line[:50]}..."
+                    )
+
 
 def main():
     # Determine project root
@@ -185,5 +193,6 @@ def main():
         logger.error("❌ Documentation validation failed!")
         sys.exit(1)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

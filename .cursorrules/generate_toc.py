@@ -6,9 +6,10 @@ Automatically generates and updates table of contents in docs/README.md
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Tuple
-import re
+
 
 class TocGenerator:
     """Generates table of contents for documentation"""
@@ -24,7 +25,7 @@ class TocGenerator:
         structure = {
             "business": {
                 "title": "📊 Бизнес-информация",
-                "description": "аудитория, конкуренты, стратегия"
+                "description": "аудитория, конкуренты, стратегия",
             },
             "technical": {
                 "title": "🏗️ Техническая документация",
@@ -33,31 +34,37 @@ class TocGenerator:
                     "architecture": "Архитектура системы",
                     "api": "API документация",
                     "database": "База данных",
-                    "deployment": "Инфраструктура"
-                }
+                    "deployment": "Инфраструктура",
+                },
             },
             "user-guides": {
                 "title": "👥 Руководства пользователей",
-                "description": "гайды по использованию"
+                "description": "гайды по использованию",
             },
             "development": {
                 "title": "💻 Для разработчиков",
-                "description": "настройка, разработка, тестирование"
-            }
+                "description": "настройка, разработка, тестирование",
+            },
         }
 
         for section, config in structure.items():
-            toc_lines.append(f"- **[{config['title']}]({section}/)** - {config['description']}")
+            toc_lines.append(
+                f"- **[{config['title']}]({section}/)** - {config['description']}"
+            )
 
             section_path = self.docs_root / section
             if section_path.exists():
-                files = self._get_section_files(section_path, config.get('subsections', {}))
+                files = self._get_section_files(
+                    section_path, config.get("subsections", {})
+                )
                 for file_link, file_title in files:
                     toc_lines.append(f"  - {file_link}")
 
         return "\n".join(toc_lines)
 
-    def _get_section_files(self, section_path: Path, subsections: Dict[str, str] = None) -> List[Tuple[str, str]]:
+    def _get_section_files(
+        self, section_path: Path, subsections: Dict[str, str] = None
+    ) -> List[Tuple[str, str]]:
         """Get files in a section, organizing by subsections if provided"""
         files = []
 
@@ -87,16 +94,16 @@ class TocGenerator:
     def _extract_title(self, file_path: Path) -> str:
         """Extract title from markdown file"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
             # Look for the first heading
-            match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
             if match:
                 return match.group(1).strip()
 
             # Fallback to filename
-            return file_path.stem.replace('-', ' ').replace('_', ' ').title()
+            return file_path.stem.replace("-", " ").replace("_", " ").title()
 
         except Exception:
             return file_path.stem
@@ -109,23 +116,24 @@ class TocGenerator:
             print(f"docs/README.md not found at {docs_readme}")
             return
 
-        with open(docs_readme, 'r', encoding='utf-8') as f:
+        with open(docs_readme, "r", encoding="utf-8") as f:
             content = f.read()
 
         # Find the TOC section
-        toc_pattern = r'(## 🗂️ Структура документации\n\n)(.*?)(\n\n## 🔍 Быстрый поиск)'
+        toc_pattern = r"(## 🗂️ Структура документации\n\n)(.*?)(\n\n## 🔍 Быстрый поиск)"
         toc_match = re.search(toc_pattern, content, re.DOTALL)
 
         if toc_match:
             new_toc = self.generate_toc()
             updated_content = content.replace(toc_match.group(2), new_toc)
 
-            with open(docs_readme, 'w', encoding='utf-8') as f:
+            with open(docs_readme, "w", encoding="utf-8") as f:
                 f.write(updated_content)
 
             print("✅ Updated docs/README.md with new TOC")
         else:
             print("⚠️  TOC section not found in docs/README.md")
+
 
 def main():
     # Determine docs root
@@ -135,5 +143,6 @@ def main():
     generator = TocGenerator(str(docs_root))
     generator.update_docs_readme()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

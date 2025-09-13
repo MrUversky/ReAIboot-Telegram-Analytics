@@ -313,3 +313,23 @@ curl -X POST "https://api.reai-boot.dev/api/posts/12345_@dnevteh/viral/update" \
 ---
 
 *Обновлено: Декабрь 2024 | Версия API: 1.0.0*
+
+
+## Get Sandbox Posts
+
+**Эндпоинт:** `GET /api/sandbox/posts`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта get_sandbox_posts.
+
+### Детали реализации
+```
+Function: get_sandbox_posts
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-13 15:36:28*
