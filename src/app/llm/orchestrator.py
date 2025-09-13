@@ -205,8 +205,8 @@ class LLMOrchestrator:
                 total_tokens += filter_result.tokens_used
 
                 # Если фильтрация не прошла или пост не подходит
-                if not filter_result.success or not filter_result.data.get("suitable", False):
-                    reason = filter_result.data.get("reason", "Не прошел фильтрацию") if filter_result.success else filter_result.error
+                if not filter_result.success or not (filter_result.data and filter_result.data.get("suitable", False)):
+                    reason = (filter_result.data.get("reason", "Не прошел фильтрацию") if filter_result.success and filter_result.data else "Не прошел фильтрацию") if filter_result.success else filter_result.error
 
                     return OrchestratorResult(
                         post_id=post_id,
@@ -230,7 +230,7 @@ class LLMOrchestrator:
             analysis_result = None
             if not skip_analysis:
                 logger.info(f"Этап 2: Анализ поста {post_id}")
-                filter_score = filter_result.data.get("score", 0) if filter_result else 0
+                filter_score = filter_result.data.get("score", 0) if filter_result and filter_result.data else 0
                 # Debug: Логируем начало анализа
                 self._log_debug_step("analysis_start", "info", {
                     "message": f"Этап 2: Анализ поста {post_id}",
@@ -287,6 +287,17 @@ class LLMOrchestrator:
                 # Если анализ не удался, продолжаем без него
                 if not analysis_result.success:
                     logger.warning(f"Анализ поста {post_id} не удался: {analysis_result.error}")
+                    # Debug: Логируем warning анализа
+                    self._log_debug_step("analysis_warning", "warning", {
+                        "message": f"Анализ поста {post_id} не удался",
+                        "error": analysis_result.error,
+                        "stage": "analysis",
+                        "post_id": post_id,
+                        "details": {
+                            "tokens_used": analysis_result.tokens_used,
+                            "processing_time": analysis_result.processing_time
+                        }
+                    })
             else:
                 logger.info(f"Пропускаем анализ для поста {post_id}")
                 stages.append(ProcessingStage(
@@ -313,6 +324,12 @@ class LLMOrchestrator:
                 # Получаем доступные рубрики и форматы
                 available_rubrics = await self._get_available_rubrics()
                 available_formats = await self._get_available_formats()
+
+                # Debug: логируем что получили
+                logger.info(f"🧪 DEBUG: available_rubrics = {available_rubrics}")
+                logger.info(f"🧪 DEBUG: available_formats = {available_formats}")
+                logger.info(f"🧪 DEBUG: available_rubrics type = {type(available_rubrics)}")
+                logger.info(f"🧪 DEBUG: available_formats type = {type(available_formats)}")
 
                 rubric_selection_data = {
                     **post_data,
@@ -395,19 +412,26 @@ class LLMOrchestrator:
                     "stage": "generation",
                     "post_id": post_id,
                     "rubric_result": rubric_result.success if rubric_result else False,
-                    "combinations_count": len(rubric_result.data.get("combinations", []) if rubric_result else [])
+                    "combinations_count": len(rubric_result.data.get("combinations", []) if rubric_result and rubric_result.data else []),
+                    "rubric_data_full": rubric_result.data if rubric_result and rubric_result.data else None,
+                    "top_combinations": rubric_result.data.get("top_combinations") if rubric_result and rubric_result.data else None,
+                    "top_3_combinations": rubric_result.data.get("top_3_combinations") if rubric_result and rubric_result.data else None,
+                    "combinations": rubric_result.data.get("combinations") if rubric_result and rubric_result.data else None
                 })
                 logger.info(f"Rubric result: {rubric_result.success if rubric_result else 'None'}")
                 logger.info(f"Rubric data: {rubric_result.data if rubric_result else 'None'}")
+                logger.info(f"Combinations: {rubric_result.data.get('combinations') if rubric_result and rubric_result.data else 'None'}")
+                logger.info(f"Top combinations: {rubric_result.data.get('top_combinations') if rubric_result and rubric_result.data else 'None'}")
+                logger.info(f"Top 3 combinations: {rubric_result.data.get('top_3_combinations') if rubric_result and rubric_result.data else 'None'}")
                 scenarios = []
                 if rubric_result and rubric_result.success:
-                    combinations = rubric_result.data.get("combinations", [])[:2]  # Топ-2 комбинации
+                    combinations = (rubric_result.data.get("combinations", []) if rubric_result.data else [])[:2]  # Топ-2 комбинации
                     if not combinations:
                         # Попробуем найти в top_combinations или top_3_combinations
-                        combinations = rubric_result.data.get("top_combinations", [])[:2]
+                        combinations = (rubric_result.data.get("top_combinations", []) if rubric_result.data else [])[:2]
                         if not combinations:
                             # Обработка формата top_3_combinations
-                            top_3_combinations = rubric_result.data.get("top_3_combinations", [])[:2]
+                            top_3_combinations = (rubric_result.data.get("top_3_combinations", []) if rubric_result.data else [])[:2]
                             combinations = []
                             for item in top_3_combinations:
                                 if isinstance(item, dict):
@@ -424,23 +448,38 @@ class LLMOrchestrator:
 
                     for i, combination in enumerate(combinations):
                         logger.info(f"Генерация сценария {i+1}/{len(combinations)} для поста {post_id}")
+                        logger.info(f"Combination data: {combination}")
+                        logger.info(f"Combination type: {type(combination)}")
 
                         # Получаем информацию о формате из комбинации
+                        if not combination or not isinstance(combination, dict):
+                            logger.error(f"Invalid combination data: {combination}, type: {type(combination)}")
+                            continue
+
                         format_info = combination.get("format", {})
+                        logger.info(f"Format info: {format_info}")
+
                         if isinstance(format_info, str):
                             # Если format - строка, используем дефолтные настройки
                             duration = 60
                             format_name = format_info
-                        else:
+                        elif format_info and isinstance(format_info, dict):
                             # Если format - объект, берем данные из него
                             duration = format_info.get('duration_seconds') or format_info.get('duration', 60)
                             format_name = format_info.get('name', 'Неизвестный формат')
+                        else:
+                            # Если format_info пустой или None, используем дефолтные настройки
+                            duration = 60
+                            format_name = 'Неизвестный формат'
 
-                        logger.info(f"Processing combination: rubric={combination.get('rubric')}, format={format_name}, duration={duration}")
+                        logger.info(f"Processing combination: rubric={combination.get('rubric', 'None')}, format={format_name}, duration={duration}")
 
                         # Исправляем формат данных для генератора
                         rubric_data = combination.get("rubric", {})
                         format_data = combination.get("format", {})
+
+                        logger.info(f"Rubric data: {rubric_data}")
+                        logger.info(f"Format data: {format_data}")
 
                         # Если rubric - строка, преобразуем в объект
                         if isinstance(rubric_data, str):
@@ -467,48 +506,115 @@ class LLMOrchestrator:
                         rubric_info = combination.get("rubric", {})
                         if isinstance(rubric_info, str):
                             rubric_name = rubric_info
-                        else:
+                        elif rubric_info and isinstance(rubric_info, dict):
                             rubric_name = rubric_info.get('name', 'Не указана')
+                        else:
+                            rubric_name = 'Не указана'
 
                         # Получаем полную информацию из rubric_selection
                         rubric_selection_data = rubric_result.data if rubric_result and rubric_result.success else {}
 
                         # Получаем информацию о выбранной рубрике и формате из БД
-                        selected_rubric_info = {}
-                        selected_format_info = {}
+                        selected_rubric_info = None
+                        selected_format_info = None
 
-                        # Ищем информацию о рубрике в доступных рубриках
-                        for rubric in available_rubrics:
-                            if isinstance(rubric_data, dict) and rubric.get('name') == rubric_data.get('name'):
-                                selected_rubric_info = rubric
-                                break
-                            elif isinstance(rubric_data, str) and rubric.get('name') == rubric_data:
-                                selected_rubric_info = rubric
-                                break
+                        # Debug: логируем доступные рубрики и форматы
+                        logger.info(f"🧪 DEBUG: available_rubrics count: {len(available_rubrics)}")
+                        logger.info(f"🧪 DEBUG: available_formats count: {len(available_formats)}")
+                        for i, r in enumerate(available_rubrics):
+                            logger.info(f"🧪 DEBUG: rubric[{i}]: {r}")
+                        for i, f in enumerate(available_formats):
+                            logger.info(f"🧪 DEBUG: format[{i}]: {f}")
 
-                        # Ищем информацию о формате в доступных форматах
-                        for fmt in available_formats:
-                            if isinstance(format_data, dict) and fmt.get('name') == format_data.get('name'):
-                                selected_format_info = fmt
-                                break
-                            elif isinstance(format_data, str) and fmt.get('name') == format_data:
-                                selected_format_info = fmt
-                                break
+                        # Ищем информацию о рубрике в доступных рубриках по ID или имени
+                        rubric_id = None
+                        if isinstance(rubric_data, dict):
+                            # Сначала попробуем найти по 'id', если нет - по 'name'
+                            rubric_id = rubric_data.get('id') or rubric_data.get('name')
+                        elif isinstance(rubric_data, str):
+                            rubric_id = rubric_data
 
-                        generator_user_prompt = prompt_manager.get_user_prompt("generate_scenario_system", {
+                        logger.info(f"🧪 DEBUG: looking for rubric_id: '{rubric_id}'")
+
+                        if rubric_id:
+                            for rubric in available_rubrics:
+                                logger.info(f"🧪 DEBUG: checking rubric: {rubric.get('id')} vs {rubric_id}")
+                                if rubric.get('id') == rubric_id or rubric.get('name') == rubric_id:
+                                    selected_rubric_info = rubric
+                                    logger.info(f"🧪 DEBUG: FOUND rubric: {selected_rubric_info}")
+                                    break
+
+                        # Ищем информацию о формате в доступных форматах по ID или имени
+                        format_id = None
+                        if isinstance(format_data, dict):
+                            # Сначала попробуем найти по 'id', если нет - по 'name'
+                            format_id = format_data.get('id') or format_data.get('name')
+                        elif isinstance(format_data, str):
+                            format_id = format_data
+
+                        logger.info(f"🧪 DEBUG: looking for format_id: '{format_id}'")
+
+                        if format_id:
+                            for fmt in available_formats:
+                                logger.info(f"🧪 DEBUG: checking format: {fmt.get('id')} vs {format_id}")
+                                if fmt.get('id') == format_id or fmt.get('name') == format_id:
+                                    selected_format_info = fmt
+                                    logger.info(f"🧪 DEBUG: FOUND format: {selected_format_info}")
+                                    break
+
+                        # Подготавливаем данные для генерации, передаем только ключевые поля
+                        analysis_data = analysis_result.data if analysis_result and analysis_result.success else {}
+
+                        # Форматируем анализ успеха в читаемом виде
+                        formatted_analysis = ""
+                        if analysis_data:
+                            success_factors = analysis_data.get('success_factors', [])
+                            audience_insights = analysis_data.get('audience_insights', [])
+                            lessons = analysis_data.get('lessons_learned', '')
+
+                            if success_factors:
+                                formatted_analysis += f"ФАКТОРЫ УСПЕХА: {'; '.join(success_factors)}\n"
+                            if audience_insights:
+                                formatted_analysis += f"ИНСАЙТЫ АУДИТОРИИ: {'; '.join(audience_insights)}\n"
+                            if lessons:
+                                formatted_analysis += f"ВЫВОДЫ: {lessons}\n"
+
+                        # Подготавливаем данные для промпта
+                        prompt_data = {
                             "post_text": post_data.get("text", ""),
-                            "post_analysis": str(analysis_result.data if analysis_result and analysis_result.success else {}),
-                            "rubric_selection_analysis": str(rubric_selection_data),
+                            "post_analysis": formatted_analysis.strip(),
+                            "rubric_selection_analysis": combination.get('reason', ''),  # Только обоснование выбора
                             "rubric_name": rubric_name,
-                            "rubric_description": selected_rubric_info.get('description', ''),
-                            "rubric_examples": selected_rubric_info.get('examples', ''),
                             "format_name": format_name,
-                            "format_description": selected_format_info.get('description', ''),
-                            "format_duration": selected_format_info.get('duration_seconds') or selected_format_info.get('duration', duration),
                             "combination_justification": combination.get('justification', ''),
                             "combination_content_idea": combination.get('content_idea', ''),
-                            "duration": duration
-                        })
+                            "duration": duration  # Будет перезаписано ниже, если есть format_duration
+                        }
+
+                        # Добавляем описание рубрики только если оно есть и не пустое
+                        if selected_rubric_info and selected_rubric_info.get('description', '').strip():
+                            prompt_data["rubric_description"] = selected_rubric_info['description']
+
+                        # Добавляем примеры рубрики - если нет поля examples, используем описание рубрики
+                        rubric_examples = ""
+                        if selected_rubric_info:
+                            rubric_examples = (selected_rubric_info.get('examples', '') or
+                                             selected_rubric_info.get('example', '') or
+                                             selected_rubric_info.get('description', ''))
+                        prompt_data["rubric_examples"] = rubric_examples
+
+                        # Добавляем описание формата только если оно есть и не пустое
+                        if selected_format_info and selected_format_info.get('description', '').strip():
+                            prompt_data["format_description"] = selected_format_info['description']
+
+                        # Добавляем длительность формата
+                        format_duration = selected_format_info.get('duration_seconds') or selected_format_info.get('duration')
+                        if format_duration:
+                            prompt_data["format_duration"] = str(format_duration)
+                            # Также обновляем duration для использования в промпте
+                            prompt_data["duration"] = format_duration
+
+                        generator_user_prompt = prompt_manager.get_user_prompt("generate_scenario_system", prompt_data)
 
                         self._log_debug_step(f"generation_{i+1}_prompts", "prompts", {
                             "system_prompt": generator_system_prompt,
@@ -723,8 +829,8 @@ class LLMOrchestrator:
                 total_tokens += filter_result.tokens_used
 
                 # Если фильтрация не прошла или пост не подходит
-                if not filter_result.success or not filter_result.data.get("suitable", False):
-                    reason = filter_result.data.get("reason", "Не прошел фильтрацию") if filter_result.success else filter_result.error
+                if not filter_result.success or not (filter_result.data and filter_result.data.get("suitable", False)):
+                    reason = (filter_result.data.get("reason", "Не прошел фильтрацию") if filter_result.success and filter_result.data else "Не прошел фильтрацию") if filter_result.success else filter_result.error
 
                     return OrchestratorResult(
                         post_id=post_id,
@@ -749,7 +855,7 @@ class LLMOrchestrator:
             analysis_result = None
             if not skip_analysis:
                 logger.info(f"Этап 2: Анализ поста {post_id}")
-                filter_score = filter_result.data.get("score", 0) if filter_result else 0
+                filter_score = filter_result.data.get("score", 0) if filter_result and filter_result.data else 0
                 analysis_result = await self.analysis_processor.process({
                     **post_data,
                     "filter_score": filter_score

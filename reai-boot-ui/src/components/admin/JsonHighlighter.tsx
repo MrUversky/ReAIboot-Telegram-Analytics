@@ -5,7 +5,7 @@ interface JsonHighlighterProps {
 }
 
 export const JsonHighlighter: React.FC<JsonHighlighterProps> = ({ data }) => {
-  const highlightJson = (obj: any, indent = 0): JSX.Element => {
+  const highlightJson = (obj: any, indent = 0): React.JSX.Element => {
     const indentStr = '  '.repeat(indent)
 
     if (obj === null) {

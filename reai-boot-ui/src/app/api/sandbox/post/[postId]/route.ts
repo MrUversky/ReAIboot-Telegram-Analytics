@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET(req: NextRequest, { params }: { params: { postId: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ postId: string }> }) {
   try {
-    const postId = params.postId;
+    const { postId } = await params;
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     const response = await fetch(`${backendUrl}/api/sandbox/post/${postId}`, {
       method: 'GET',

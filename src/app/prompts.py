@@ -330,6 +330,10 @@ class PromptManager:
 
         variables = variables or {}
 
+        # Автоматически добавляем project_context если его нет в переменных
+        if 'project_context' not in variables:
+            variables['project_context'] = self.get_project_context()
+
         user_prompt = template.user_prompt or ""  # Пустой по умолчанию
         for key, value in variables.items():
             placeholder = "{{" + key + "}}"

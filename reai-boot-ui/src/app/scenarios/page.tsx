@@ -37,6 +37,7 @@ interface Scenario {
   quality_score?: number
   engagement_prediction?: number
   full_scenario?: any
+  posts?: any
 }
 
 export default function ScenariosPage() {
@@ -101,12 +102,12 @@ export default function ScenariosPage() {
         description: scenario.description || '',
         status: scenario.status as 'draft' | 'processing' | 'completed' | 'failed',
         created_at: scenario.created_at,
-        post_title: (scenario.posts && Array.isArray(scenario.posts) && scenario.posts[0]?.text_preview) ||
-                   (scenario.posts && !Array.isArray(scenario.posts) && scenario.posts.text_preview) ||
-                   (scenario.posts && !Array.isArray(scenario.posts) && scenario.posts.full_text) ||
+        post_title: (scenario.posts && Array.isArray(scenario.posts) && scenario.posts[0] && (scenario.posts[0] as any).text_preview) ||
+                   (scenario.posts && !Array.isArray(scenario.posts) && (scenario.posts as any).text_preview) ||
+                   (scenario.posts && !Array.isArray(scenario.posts) && (scenario.posts as any).full_text) ||
                    'Без названия',
-        channel_name: (scenario.posts && Array.isArray(scenario.posts) && scenario.posts[0]?.channel_username) ||
-                     (scenario.posts && !Array.isArray(scenario.posts) && scenario.posts.channel_username) ||
+        channel_name: (scenario.posts && Array.isArray(scenario.posts) && scenario.posts[0] && (scenario.posts[0] as any).channel_username) ||
+                     (scenario.posts && !Array.isArray(scenario.posts) && (scenario.posts as any).channel_username) ||
                      'Неизвестный канал',
         duration: 60, // Default duration
         views: 0, // TODO: Add views tracking
@@ -601,18 +602,19 @@ export default function ScenariosPage() {
 
                 {/* Content Details - Collapsible */}
                 <Card>
-                  <CardHeader>
-                    <CardTitle
-                      className="cursor-pointer flex items-center justify-between hover:text-blue-600 transition-colors"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        setShowContentDetails(!showContentDetails)
-                      }}
-                    >
+                  <div
+                    className="cursor-pointer hover:bg-gray-50 transition-colors"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setShowContentDetails(!showContentDetails)
+                    }}
+                  >
+                    <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
                       <span>Детали контента</span>
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
                         className="p-0 h-auto"
                         onClick={(e) => {
@@ -628,7 +630,8 @@ export default function ScenariosPage() {
                         )}
                       </Button>
                     </CardTitle>
-                  </CardHeader>
+                    </CardHeader>
+                  </div>
                   {showContentDetails && (
                     <CardContent>
                       <div className="space-y-4">

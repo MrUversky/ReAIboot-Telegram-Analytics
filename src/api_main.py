@@ -2900,3 +2900,39 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
+
+
+# === ПРОМПТЫ И КЭШ ===
+
+@app.post("/admin/reload-prompts", tags=["admin"])
+async def reload_prompts():
+    """Перезагружает промпты из базы данных."""
+    try:
+        from .app.prompts import prompt_manager
+        prompt_manager.reload_db_prompts()
+        logger.info("Промпты успешно перезагружены из базы данных")
+        return {"message": "Промпты успешно перезагружены"}
+    except Exception as e:
+        logger.error(f"Ошибка при перезагрузке промптов: {e}")
+        return {"error": str(e)}, 500
+
+
+@app.get("/admin/current-prompt/{prompt_name}", tags=["admin"])
+async def get_current_prompt(prompt_name: str):
+    """Получает текущий промпт из кэша."""
+    try:
+        from .app.prompts import prompt_manager
+        template = prompt_manager.get_template(prompt_name)
+        if template:
+            return {
+                "name": template.name,
+                "system_prompt": template.system_prompt,
+                "user_prompt": template.user_prompt,
+                "variables": template.variables,
+                "model_settings": template.model_settings
+            }
+        else:
+            return {"error": f"Промпт {prompt_name} не найден"}, 404
+    except Exception as e:
+        logger.error(f"Ошибка при получении промпта: {e}")
+        return {"error": str(e)}, 500

@@ -40,6 +40,9 @@ export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
   // Error state
   const [jsonError, setJsonError] = useState<string>('')
 
+  // Prompt reload state
+  const [isReloadingPrompts, setIsReloadingPrompts] = useState(false)
+
   const validatePostData = (jsonString: string) => {
     if (!jsonString.trim()) {
       return { isValid: false, error: 'Введите данные поста в формате JSON' }
@@ -362,6 +365,30 @@ export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
     }
   }
 
+  // Функция перезагрузки промптов из базы данных
+  const handleReloadPrompts = async () => {
+    setIsReloadingPrompts(true)
+    try {
+      const response = await fetch('/admin/reload-prompts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log('Промпты перезагружены:', result)
+      alert('Промпты успешно перезагружены из базы данных!')
+    } catch (error) {
+      console.error('Error reloading prompts:', error)
+      alert('Ошибка при перезагрузке промптов: ' + (error instanceof Error ? error.message : String(error)))
+    } finally {
+      setIsReloadingPrompts(false)
+    }
+  }
+
   // Функции пошагового выполнения
   const startStepByStepExecution = async () => {
     const validation = validatePostData(postData)
@@ -567,6 +594,19 @@ export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
           </Button>
           <Button variant="outline" onClick={() => setPostData('')}>
             Очистить
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleReloadPrompts}
+            disabled={isReloadingPrompts}
+            size="sm"
+          >
+            {isReloadingPrompts ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></div>
+            ) : (
+              <RotateCcw className="w-4 h-4 mr-2" />
+            )}
+            Перезагрузить промпты
           </Button>
           {stepByStepMode && (
             <Button variant="secondary" onClick={resetStepByStepExecution} size="sm">
@@ -823,6 +863,7 @@ export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
                       <SelectContent>
                         <SelectItem value="all">Все типы</SelectItem>
                         <SelectItem value="info">Информация</SelectItem>
+                        <SelectItem value="warning">Предупреждения</SelectItem>
                         <SelectItem value="error">Ошибки</SelectItem>
                         <SelectItem value="llm_response">LLM ответ</SelectItem>
                         <SelectItem value="prompts">Промпты</SelectItem>
@@ -913,7 +954,6 @@ export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
                                   )}
                                 </div>
                               </div>
-                            ) : log.step_type === 'db_operation' ? (
                             ) : log.step_type === 'info' ? (
                               <div className="space-y-2">
                                 <div className="font-medium text-blue-700">ℹ️ Информация:</div>
@@ -942,6 +982,39 @@ export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
                                   )}
                                 </div>
                               </div>
+                            ) : log.step_type === 'warning' ? (
+                              <div className="space-y-2">
+                                <div className="font-medium text-yellow-700">⚠️ Предупреждение:</div>
+                                <div className="bg-yellow-50 border border-yellow-200 p-2 rounded text-xs">
+                                  <div className="font-medium">Сообщение:</div>
+                                  <div className="font-mono whitespace-pre-wrap mt-1">
+                                    {log.data?.message || log.data?.error || 'Нет сообщения'}
+                                  </div>
+                                  {log.data?.stage && (
+                                    <div className="mt-1">
+                                      <strong>Этап:</strong> {log.data.stage}
+                                    </div>
+                                  )}
+                                  {log.data?.post_id && (
+                                    <div className="mt-1">
+                                      <strong>Пост:</strong> {log.data.post_id}
+                                    </div>
+                                  )}
+                                  {log.data?.error && (
+                                    <div className="mt-1">
+                                      <strong>Ошибка:</strong> {log.data.error}
+                                    </div>
+                                  )}
+                                  {log.data?.details && (
+                                    <div className="mt-2">
+                                      <div className="font-medium">Детали:</div>
+                                      <div className="font-mono whitespace-pre-wrap mt-1 text-xs max-h-32 overflow-y-auto">
+                                        {JSON.stringify(log.data.details, null, 2)}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
                             ) : log.step_type === 'db_operation' ? (
                               <div className="space-y-2">
                                 <div className="font-medium text-green-700">💾 Операция с БД:</div>
@@ -957,11 +1030,46 @@ export const SandboxSection: React.FC<SandboxSectionProps> = ({}) => {
                                     <div className="mt-1">Пост: {log.data.post_id}</div>
                                   )}
                                   <div className="mt-2">
-                                    <div className="font-medium">Данные:</div>
-                                    <div className="font-mono whitespace-pre-wrap mt-1 text-xs max-h-48 overflow-y-auto border bg-white p-2 rounded">
+                                    <div className="font-medium">Полные данные сохранения:</div>
+                                    <div className="font-mono whitespace-pre-wrap mt-1 text-xs max-h-64 overflow-y-auto border bg-white p-3 rounded">
                                       {JSON.stringify(log.data.data || log.data, null, 2)}
                                     </div>
                                   </div>
+                                  {log.data?.stage === 'filter' && (
+                                    <div className="mt-2 text-xs">
+                                      <div className="font-medium">📊 Детали фильтра:</div>
+                                      <div className="mt-1 space-y-1">
+                                        <div><strong>Оценка:</strong> {log.data.data?.suitability_score || 'N/A'}</div>
+                                        <div><strong>Подходит:</strong> {log.data.data?.is_suitable ? 'Да' : 'Нет'}</div>
+                                        <div><strong>Причина:</strong> {log.data.data?.filter_reason || 'N/A'}</div>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {log.data?.stage === 'analysis' && (
+                                    <div className="mt-2 text-xs">
+                                      <div className="font-medium">🧠 Детали анализа:</div>
+                                      <div className="mt-1 space-y-1">
+                                        <div><strong>Факторы успеха:</strong></div>
+                                        <div className="font-mono text-xs bg-white p-1 rounded border max-h-24 overflow-y-auto">
+                                          {JSON.stringify(log.data.data?.success_factors, null, 2)}
+                                        </div>
+                                        <div><strong>Аудитория:</strong></div>
+                                        <div className="font-mono text-xs bg-white p-1 rounded border max-h-24 overflow-y-auto">
+                                          {JSON.stringify(log.data.data?.audience_insights, null, 2)}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {log.data?.stage && log.data.stage.includes('generation') && (
+                                    <div className="mt-2 text-xs">
+                                      <div className="font-medium">🎬 Детали генерации:</div>
+                                      <div className="mt-1 space-y-1">
+                                        <div><strong>Сценарии:</strong> {Array.isArray(log.data.data?.generated_scenarios) ? log.data.data.generated_scenarios.length : 'N/A'}</div>
+                                        <div><strong>Рубрика:</strong> {log.data.data?.selected_rubric_id || 'N/A'}</div>
+                                        <div><strong>Формат:</strong> {log.data.data?.selected_format_id || 'N/A'}</div>
+                                      </div>
+                                    </div>
+                                  )}
                                   {log.data?.tokens_used && (
                                     <div className="mt-1">
                                       <strong>Токенов:</strong> {log.data.tokens_used}

@@ -99,18 +99,34 @@ class GeneratorProcessor(BaseLLMProcessor):
                 "duration": duration
             })
 
+            # Используем все новые переменные, которые передаются из orchestrator
             user_prompt = self.prompt_manager.get_user_prompt("generate_scenario_system", {
                 "post_text": post_text,
-                "post_analysis": str(analysis),  # передаем анализ как строку
+                "post_analysis": input_data.get("post_analysis", str(analysis)),
+                "rubric_selection_analysis": input_data.get("rubric_selection_analysis", ""),
                 "rubric_name": rubric.get('name', 'Не указана'),
+                "rubric_description": input_data.get("rubric_description", ""),
+                "rubric_examples": input_data.get("rubric_examples", ""),
                 "format_name": reel_format.get('name', 'Не указан'),
+                "format_description": input_data.get("format_description", ""),
+                "format_duration": input_data.get("format_duration", str(duration)),
+                "combination_justification": input_data.get("combination_justification", ""),
+                "combination_content_idea": input_data.get("combination_content_idea", ""),
                 "duration": duration
             })
 
             # Debug: логируем промпты
-            logger.debug(f"🧪 GENERATOR PROMPT - System: {system_prompt}")
-            logger.debug(f"🧪 GENERATOR PROMPT - User: {user_prompt}")
-            logger.debug(f"🧪 GENERATOR INPUT DATA: post_text={post_text[:100]}..., rubric={rubric.get('name')}, format={reel_format.get('name')}, duration={duration}")
+            print(f"🧪 GENERATOR PROMPT - System: {system_prompt}")
+            print(f"🧪 GENERATOR PROMPT - User: {user_prompt}")
+            print(f"🧪 GENERATOR INPUT DATA: post_text={post_text[:100]}..., rubric={rubric.get('name')}, format={reel_format.get('name')}, duration={duration}")
+
+            # Debug: логируем ключевые переменные из input_data
+            print(f"🧪 GENERATOR DEBUG - rubric_description: '{input_data.get('rubric_description', 'NOT_FOUND')}'")
+            print(f"🧪 GENERATOR DEBUG - rubric_examples: '{input_data.get('rubric_examples', 'NOT_FOUND')}'")
+            print(f"🧪 GENERATOR DEBUG - format_description: '{input_data.get('format_description', 'NOT_FOUND')}'")
+            print(f"🧪 GENERATOR DEBUG - format_duration: '{input_data.get('format_duration', 'NOT_FOUND')}'")
+            print(f"🧪 GENERATOR DEBUG - combination_justification: '{input_data.get('combination_justification', 'NOT_FOUND')[:100]}...'")
+            print(f"🧪 GENERATOR DEBUG - combination_content_idea: '{input_data.get('combination_content_idea', 'NOT_FOUND')[:100]}...'")
 
             # Выполняем запрос
             success, response, error = await self._make_request_with_retry(
