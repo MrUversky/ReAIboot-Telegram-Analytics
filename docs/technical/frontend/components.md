@@ -6,6 +6,21 @@
 
 ## React Компоненты
 
+### RootLayout
+
+**Файл:** `reai-boot-ui/src/app/layout.tsx`
+
+**Описание:** Frontend component
+
+**Тип:** React компонент
+
+**Назначение:** [Требуется описание]
+
+**Props:** [Требуется анализ]
+
+**Состояние:** [Требуется анализ]
+
+
 ### ApiErrorBoundary
 
 **Файл:** `reai-boot-ui/src/components/ApiErrorBoundary.tsx`
