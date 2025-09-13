@@ -1,0 +1,74 @@
+# Pre-commit hooks configuration for ReAIboot
+# Install with: pre-commit install
+
+repos:
+  # Standard hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: debug-statements
+
+  # Python-specific
+  - repo: https://github.com/psf/black
+    rev: 23.7.0
+    hooks:
+      - id: black
+        language_version: python3
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        args: ["--profile", "black"]
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.0.0
+    hooks:
+      - id: flake8
+        args: ["--max-line-length=120", "--extend-ignore=E203,W503"]
+
+  # Documentation validation
+  - repo: local
+    hooks:
+      - id: documentation-check
+        name: Validate documentation
+        entry: python .cursorrules/check_docs.py
+        language: system
+        files: ^(docs/|src/.*\.py)$
+        pass_filenames: false
+        description: "Validate documentation quality and completeness"
+
+      - id: documentation-update
+        name: Auto-update documentation
+        entry: python .cursorrules/update_docs.py
+        language: system
+        files: ^src/.*\.py$
+        pass_filenames: false
+        description: "Automatically update documentation based on code changes"
+        stages: [commit]
+
+  # SQL validation
+  - repo: https://github.com/sqlfluff/sqlfluff
+    rev: 2.1.2
+    hooks:
+      - id: sqlfluff-lint
+        files: ^.*\.sql$
+      - id: sqlfluff-fix
+        files: ^.*\.sql$
+
+exclude: |
+  (?x)(
+    # Exclude generated files
+    ^docs/technical/api/swagger\.json$|
+    # Exclude test files
+    ^test_.*\.py$|
+    ^tests/|
+    # Exclude virtual environment
+    ^venv/|
+    ^venv_py39/
+  )
