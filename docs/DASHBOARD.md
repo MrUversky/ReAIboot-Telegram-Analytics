@@ -7,10 +7,10 @@
 ## 📊 Метрики проекта
 
 
-- **Всего документов:** 26
+- **Всего документов:** 33
 - **API эндпоинтов:** 5
-- **Архитектурных компонентов:** 2
-- **Время последнего анализа:** 16:21:20
+- **Архитектурных компонентов:** 4
+- **Время последнего анализа:** 21:02:47
 - **Статус системы:** ✅ Активна
 
 
@@ -20,15 +20,21 @@
 - [Audience](./business/audience.md)
 - [Overview](./business/overview.md)
 - [Competitors](./business/competitors.md)
+- [Project-Plan](./business/project-plan.md)
+- [Content-Strategy](./business/content-strategy.md)
+- [Youtube-Strategy](./business/youtube-strategy.md)
 
 ### Technical Documentation
 **Api:**
   - [Overview](./technical/api/overview.md)
 **Architecture:**
+  - [Viral-Detection](./technical/architecture/viral-detection.md)
   - [Llm-Integration](./technical/architecture/llm-integration.md)
   - [Components](./technical/architecture/components.md)
+  - [Project-Structure](./technical/architecture/project-structure.md)
 **Database:**
   - [Schema](./technical/database/schema.md)
+  - [Supabase-Setup](./technical/database/supabase-setup.md)
 **Deployment:**
   - [Guide](./technical/deployment/guide.md)
 **Frontend:**
@@ -104,4 +110,4 @@
 ---
 
 *Dashboard обновляется автоматически при изменениях в документации*
-*Последнее обновление: 2025-09-13 16:21:20*
+*Последнее обновление: 2025-09-13 21:02:47*

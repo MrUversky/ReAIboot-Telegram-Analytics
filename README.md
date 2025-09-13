@@ -58,7 +58,7 @@
 
 # Или запуск только backend
 source venv_py39/bin/activate
-./venv_py39/bin/python run_api.py
+./venv_py39/bin/python scripts/run_api.py
 ```
 
 ### Авторизация Telegram
@@ -155,7 +155,7 @@ A: Убедитесь, что:
 2. **Ручная очистка сессии:**
    ```bash
    # Остановите все процессы
-   pkill -f "python.*run_api.py"
+   pkill -f "scripts/run_api.py"
 
    # Удалите файлы сессии
    rm -f telegram_session.session*

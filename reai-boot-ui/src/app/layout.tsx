@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { SupabaseProvider } from "@/components/SupabaseProvider";
 import { Navigation } from "@/components/Navigation";
+import { ApiErrorBoundary } from "@/components/ApiErrorBoundary";
 import { Toaster } from "react-hot-toast";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -20,14 +21,16 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body className={inter.className}>
-        <SupabaseProvider>
-          <div className="min-h-screen bg-gray-50">
-            <Navigation />
-            <main className="container mx-auto px-4 py-8">
-              {children}
-            </main>
-          </div>
-        </SupabaseProvider>
+        <ApiErrorBoundary>
+          <SupabaseProvider>
+            <div className="min-h-screen bg-gray-50">
+              <Navigation />
+              <main className="container mx-auto px-4 py-8">
+                {children}
+              </main>
+            </div>
+          </SupabaseProvider>
+        </ApiErrorBoundary>
         <Toaster
           position="top-right"
           toastOptions={{

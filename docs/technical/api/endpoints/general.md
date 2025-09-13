@@ -138,3 +138,23 @@ Location: Unknown
 ---
 
 *Сгенерировано автоматически: 2025-09-13 16:21:20*
+
+
+## Parse Single Channel
+
+**Эндпоинт:** `POST /api/parsing/channel`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта parse_single_channel.
+
+### Детали реализации
+```
+Function: parse_single_channel
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-13 21:02:47*

@@ -2,37 +2,43 @@
 Модуль для загрузки и управления настройками приложения.
 """
 
-import os
-import yaml
 import json
-import requests
 import logging
-from pathlib import Path
-from typing import Dict, List, Any, Optional
-from dotenv import load_dotenv
-import pytz
+import os
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import pytz
+import requests
+import yaml
+from dotenv import load_dotenv
 
 # Загрузка .env файла
 load_dotenv()
 
+
 class Settings:
     """Класс для управления всеми настройками приложения."""
-    
+
     def __init__(self):
         # Telegram настройки
         self.telegram_api_id = int(os.getenv("TELEGRAM_API_ID", "0"))
         self.telegram_api_hash = os.getenv("TELEGRAM_API_HASH", "")
         self.telegram_session = os.getenv("TELEGRAM_SESSION", "telegram_session")
-        
+
         # OpenAI настройки
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.openai_base_url = os.getenv("OPENAI_BASE_URL")
         self.openai_model_name = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
         # Claude настройки
-        self.anthropic_api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-        self.anthropic_model_name = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+        self.anthropic_api_key = os.getenv("CLAUDE_API_KEY") or os.getenv(
+            "ANTHROPIC_API_KEY"
+        )
+        self.anthropic_model_name = os.getenv(
+            "ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"
+        )
 
         # Модели для разных процессоров
         self.filter_model = os.getenv("FILTER_MODEL", self.openai_model_name)
@@ -47,64 +53,59 @@ class Settings:
 
         # Настройки приложения
         self.timezone = os.getenv("TZ", "Asia/Tbilisi")
-        
-        self.base_dir = Path(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        self.out_dir = self.base_dir / "out"
-        
-        # Создаем директорию для выходных файлов, если она не существует
-        os.makedirs(self.out_dir, exist_ok=True)
-    
+
+        self.base_dir = Path(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        )
+        self.configs_dir = self.base_dir / "configs"
+
+        # Создаем директорию для конфигурационных файлов
+        os.makedirs(self.configs_dir, exist_ok=True)
+
     @property
     def tz(self):
         """Возвращает объект timezone."""
         return pytz.timezone(self.timezone)
-    
+
     def load_channels(self, file_path: Optional[str] = None) -> List[str]:
         """Загружает список каналов из файла."""
-        
+
         if not file_path:
             file_path = self.base_dir / "channels.txt"
         else:
             file_path = Path(file_path)
-        
+
         if not file_path.exists():
             raise FileNotFoundError(f"Файл со списком каналов не найден: {file_path}")
-        
+
         with open(file_path, "r", encoding="utf-8") as f:
             channels = [line.strip() for line in f if line.strip()]
-        
+
         return channels
-    
+
     def load_content_plan(self, file_path: Optional[str] = None) -> Dict[str, Any]:
-        """Загружает план контента из YAML файла."""
-        
-        if not file_path:
-            file_path = self.base_dir / "content_plan.yaml"
-        else:
-            file_path = Path(file_path)
-        
-        if not file_path.exists():
-            raise FileNotFoundError(f"Файл с планом контента не найден: {file_path}")
-        
-        with open(file_path, "r", encoding="utf-8") as f:
-            content_plan = yaml.safe_load(f)
-        
-        return content_plan
-    
+        """
+        УСТАРЕЛО: Рубрики теперь хранятся в БД (таблица rubrics).
+
+        Возвращает пустую структуру для совместимости с legacy кодом.
+        """
+        print("⚠️  load_content_plan() устарел. Рубрики хранятся в таблице rubrics БД.")
+        return {"rubrics": [], "constraints": {}}
+
     def load_score_weights(self, file_path: Optional[str] = None) -> Dict[str, float]:
         """Загружает веса для расчета метрик из YAML файла."""
-        
+
         if not file_path:
-            file_path = self.base_dir / "score.yaml"
+            file_path = self.configs_dir / "score.yaml"
         else:
             file_path = Path(file_path)
-        
+
         if not file_path.exists():
             raise FileNotFoundError(f"Файл с весами метрик не найден: {file_path}")
-        
+
         with open(file_path, "r", encoding="utf-8") as f:
             score_config = yaml.safe_load(f)
-        
+
         return score_config.get("weights", {})
 
 
@@ -113,24 +114,24 @@ class LLMPriceManager:
 
     # Дефолтные цены (последнее известное значение)
     DEFAULT_PRICES = {
-        'gpt-4o': {
-            'input': 2.50,    # $2.50 за 1M токенов
-            'output': 10.00   # $10.00 за 1M токенов
+        "gpt-4o": {
+            "input": 2.50,  # $2.50 за 1M токенов
+            "output": 10.00,  # $10.00 за 1M токенов
         },
-        'gpt-4o-mini': {
-            'input': 0.150,   # $0.150 за 1M токенов
-            'output': 0.600   # $0.600 за 1M токенов
+        "gpt-4o-mini": {
+            "input": 0.150,  # $0.150 за 1M токенов
+            "output": 0.600,  # $0.600 за 1M токенов
         },
-        'claude-3-5-sonnet': {
-            'input': 3.0,     # $3.0 за 1M токенов
-            'output': 15.0    # $15.0 за 1M токенов
-        }
+        "claude-3-5-sonnet": {
+            "input": 3.0,  # $3.0 за 1M токенов
+            "output": 15.0,  # $15.0 за 1M токенов
+        },
     }
 
     # API endpoints для получения цен
     API_ENDPOINTS = {
-        'openai': 'https://api.openai.com/v1/models',
-        'anthropic': 'https://api.anthropic.com/v1/models'
+        "openai": "https://api.openai.com/v1/models",
+        "anthropic": "https://api.anthropic.com/v1/models",
     }
 
     def __init__(self):
@@ -138,7 +139,7 @@ class LLMPriceManager:
         self.cache_timestamp = None
         self.cache_duration = timedelta(hours=24)  # Кэш на 24 часа
 
-    def get_price_per_1k_tokens(self, model: str, token_type: str = 'input') -> float:
+    def get_price_per_1k_tokens(self, model: str, token_type: str = "input") -> float:
         """
         Получить цену за 1000 токенов для указанной модели.
 
@@ -157,9 +158,9 @@ class LLMPriceManager:
 
         # Получаем актуальные цены
         try:
-            if model.startswith('gpt'):
+            if model.startswith("gpt"):
                 price = self._get_openai_price(model, token_type)
-            elif model.startswith('claude'):
+            elif model.startswith("claude"):
                 price = self._get_anthropic_price(model, token_type)
             else:
                 raise ValueError(f"Неизвестная модель: {model}")
@@ -175,8 +176,12 @@ class LLMPriceManager:
         except Exception as e:
             logging.warning(f"Не удалось получить актуальную цену для {model}: {e}")
             # Возвращаем дефолтную цену
-            default_price_per_million = self.DEFAULT_PRICES.get(model, {}).get(token_type, 1.0)
-            return default_price_per_million / 1000  # Конвертируем в цену за 1000 токенов
+            default_price_per_million = self.DEFAULT_PRICES.get(model, {}).get(
+                token_type, 1.0
+            )
+            return (
+                default_price_per_million / 1000
+            )  # Конвертируем в цену за 1000 токенов
 
     def _is_cache_valid(self) -> bool:
         """Проверяет, действителен ли кэш."""
@@ -234,12 +239,16 @@ class LLMPriceManager:
 
         try:
             headers = {"Authorization": f"Bearer {api_key}"}
-            response = requests.get(self.API_ENDPOINTS['openai'], headers=headers, timeout=10)
+            response = requests.get(
+                self.API_ENDPOINTS["openai"], headers=headers, timeout=10
+            )
 
             if response.status_code == 200:
                 # В реальном API OpenAI цены можно получить через отдельный endpoint
                 # Пока возвращаем None для демонстрации
-                logging.info("OpenAI API доступен, но цены нужно получать через pricing API")
+                logging.info(
+                    "OpenAI API доступен, но цены нужно получать через pricing API"
+                )
                 return None
 
         except Exception as e:
@@ -247,7 +256,9 @@ class LLMPriceManager:
 
         return None
 
-    def _fetch_openai_price_from_public_sources(self, model: str, token_type: str) -> float:
+    def _fetch_openai_price_from_public_sources(
+        self, model: str, token_type: str
+    ) -> float:
         """Получить цены из публичных источников OpenAI."""
         try:
             # Попытка получить цены с официального сайта
@@ -272,7 +283,9 @@ class LLMPriceManager:
 
         try:
             headers = {"x-api-key": api_key, "Content-Type": "application/json"}
-            response = requests.get(self.API_ENDPOINTS['anthropic'], headers=headers, timeout=10)
+            response = requests.get(
+                self.API_ENDPOINTS["anthropic"], headers=headers, timeout=10
+            )
 
             if response.status_code == 200:
                 # Аналогично OpenAI - цены через отдельный endpoint
@@ -284,7 +297,9 @@ class LLMPriceManager:
 
         return None
 
-    def _fetch_anthropic_price_from_public_sources(self, model: str, token_type: str) -> float:
+    def _fetch_anthropic_price_from_public_sources(
+        self, model: str, token_type: str
+    ) -> float:
         """Получить цены из публичных источников Anthropic."""
         try:
             response = requests.get("https://www.anthropic.com/pricing", timeout=10)
@@ -297,7 +312,9 @@ class LLMPriceManager:
             logging.warning(f"Ошибка при запросе к публичному источнику Anthropic: {e}")
         return None
 
-    def calculate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
+    def calculate_cost(
+        self, model: str, input_tokens: int, output_tokens: int
+    ) -> float:
         """
         Рассчитать общую стоимость запроса.
 
@@ -309,8 +326,12 @@ class LLMPriceManager:
         Returns:
             Стоимость в долларах
         """
-        input_cost = (input_tokens / 1000) * self.get_price_per_1k_tokens(model, 'input')
-        output_cost = (output_tokens / 1000) * self.get_price_per_1k_tokens(model, 'output')
+        input_cost = (input_tokens / 1000) * self.get_price_per_1k_tokens(
+            model, "input"
+        )
+        output_cost = (output_tokens / 1000) * self.get_price_per_1k_tokens(
+            model, "output"
+        )
         return input_cost + output_cost
 
     def get_cost_summary(self, usage_data: Dict[str, Dict]) -> Dict[str, Any]:
@@ -327,23 +348,25 @@ class LLMPriceManager:
         breakdown = {}
 
         for stage, data in usage_data.items():
-            model = data['model']
-            input_tokens = data.get('input_tokens', 0)
-            output_tokens = data.get('output_tokens', 0)
+            model = data["model"]
+            input_tokens = data.get("input_tokens", 0)
+            output_tokens = data.get("output_tokens", 0)
 
             cost = self.calculate_cost(model, input_tokens, output_tokens)
             total_cost += cost
             breakdown[stage] = {
-                'cost_usd': round(cost, 6),
-                'tokens': input_tokens + output_tokens,
-                'model': model
+                "cost_usd": round(cost, 6),
+                "tokens": input_tokens + output_tokens,
+                "model": model,
             }
 
         return {
-            'total_cost_usd': round(total_cost, 6),
-            'total_cost_rub': round(total_cost * 100, 2),  # Примерный курс 100 руб/$
-            'breakdown': breakdown,
-            'last_updated': self.cache_timestamp.isoformat() if self.cache_timestamp else None
+            "total_cost_usd": round(total_cost, 6),
+            "total_cost_rub": round(total_cost * 100, 2),  # Примерный курс 100 руб/$
+            "breakdown": breakdown,
+            "last_updated": self.cache_timestamp.isoformat()
+            if self.cache_timestamp
+            else None,
         }
 
     def force_refresh_prices(self) -> Dict[str, Any]:
@@ -356,16 +379,16 @@ class LLMPriceManager:
         refreshed_prices = {}
         for model in self.DEFAULT_PRICES.keys():
             refreshed_prices[model] = {
-                'input': self.get_price_per_1k_tokens(model, 'input'),
-                'output': self.get_price_per_1k_tokens(model, 'output')
+                "input": self.get_price_per_1k_tokens(model, "input"),
+                "output": self.get_price_per_1k_tokens(model, "output"),
             }
 
         self.cache_timestamp = datetime.now()
 
         return {
-            'refreshed_prices': refreshed_prices,
-            'timestamp': self.cache_timestamp.isoformat(),
-            'status': 'success'
+            "refreshed_prices": refreshed_prices,
+            "timestamp": self.cache_timestamp.isoformat(),
+            "status": "success",
         }
 
     def get_price_changes_report(self, previous_prices: Dict = None) -> Dict[str, Any]:
@@ -378,28 +401,36 @@ class LLMPriceManager:
 
         for model in self.DEFAULT_PRICES.keys():
             current_prices[model] = {
-                'input': self.get_price_per_1k_tokens(model, 'input'),
-                'output': self.get_price_per_1k_tokens(model, 'output')
+                "input": self.get_price_per_1k_tokens(model, "input"),
+                "output": self.get_price_per_1k_tokens(model, "output"),
             }
 
             if model in previous_prices:
                 changes[model] = {
-                    'input_change': current_prices[model]['input'] - (previous_prices[model].get('input', 0) / 1000),
-                    'output_change': current_prices[model]['output'] - (previous_prices[model].get('output', 0) / 1000),
-                    'input_percent': 0,
-                    'output_percent': 0
+                    "input_change": current_prices[model]["input"]
+                    - (previous_prices[model].get("input", 0) / 1000),
+                    "output_change": current_prices[model]["output"]
+                    - (previous_prices[model].get("output", 0) / 1000),
+                    "input_percent": 0,
+                    "output_percent": 0,
                 }
 
                 # Расчет процентного изменения
-                if previous_prices[model].get('input', 0) > 0:
-                    changes[model]['input_percent'] = (changes[model]['input_change'] / (previous_prices[model]['input'] / 1000)) * 100
-                if previous_prices[model].get('output', 0) > 0:
-                    changes[model]['output_percent'] = (changes[model]['output_change'] / (previous_prices[model]['output'] / 1000)) * 100
+                if previous_prices[model].get("input", 0) > 0:
+                    changes[model]["input_percent"] = (
+                        changes[model]["input_change"]
+                        / (previous_prices[model]["input"] / 1000)
+                    ) * 100
+                if previous_prices[model].get("output", 0) > 0:
+                    changes[model]["output_percent"] = (
+                        changes[model]["output_change"]
+                        / (previous_prices[model]["output"] / 1000)
+                    ) * 100
 
         return {
-            'current_prices': current_prices,
-            'changes': changes,
-            'generated_at': datetime.now().isoformat()
+            "current_prices": current_prices,
+            "changes": changes,
+            "generated_at": datetime.now().isoformat(),
         }
 
     def validate_prices(self) -> Dict[str, Any]:
@@ -409,35 +440,47 @@ class LLMPriceManager:
 
         for model in self.DEFAULT_PRICES.keys():
             try:
-                input_price = self.get_price_per_1k_tokens(model, 'input')
-                output_price = self.get_price_per_1k_tokens(model, 'output')
+                input_price = self.get_price_per_1k_tokens(model, "input")
+                output_price = self.get_price_per_1k_tokens(model, "output")
 
                 # Проверка на отрицательные цены
                 if input_price < 0:
-                    issues.append(f"Отрицательная цена input для {model}: {input_price}")
+                    issues.append(
+                        f"Отрицательная цена input для {model}: {input_price}"
+                    )
                 if output_price < 0:
-                    issues.append(f"Отрицательная цена output для {model}: {output_price}")
+                    issues.append(
+                        f"Отрицательная цена output для {model}: {output_price}"
+                    )
 
                 # Проверка на слишком низкие цены (возможная ошибка)
                 if input_price < 0.00001 and input_price > 0:
-                    warnings.append(f"Подозрительно низкая цена input для {model}: {input_price}")
+                    warnings.append(
+                        f"Подозрительно низкая цена input для {model}: {input_price}"
+                    )
                 if output_price < 0.00001 and output_price > 0:
-                    warnings.append(f"Подозрительно низкая цена output для {model}: {output_price}")
+                    warnings.append(
+                        f"Подозрительно низкая цена output для {model}: {output_price}"
+                    )
 
                 # Проверка на слишком высокие цены
                 if input_price > 10:  # $10 за 1000 токенов - слишком много
-                    issues.append(f"Подозрительно высокая цена input для {model}: {input_price}")
+                    issues.append(
+                        f"Подозрительно высокая цена input для {model}: {input_price}"
+                    )
                 if output_price > 50:  # $50 за 1000 токенов - слишком много
-                    issues.append(f"Подозрительно высокая цена output для {model}: {output_price}")
+                    issues.append(
+                        f"Подозрительно высокая цена output для {model}: {output_price}"
+                    )
 
             except Exception as e:
                 issues.append(f"Ошибка получения цены для {model}: {str(e)}")
 
         return {
-            'valid': len(issues) == 0,
-            'issues': issues,
-            'warnings': warnings,
-            'validated_at': datetime.now().isoformat()
+            "valid": len(issues) == 0,
+            "issues": issues,
+            "warnings": warnings,
+            "validated_at": datetime.now().isoformat(),
         }
 
 

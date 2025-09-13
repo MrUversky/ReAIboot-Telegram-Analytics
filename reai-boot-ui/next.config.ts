@@ -13,6 +13,34 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Отключаем кэширование только в development
+  ...(process.env.NODE_ENV === 'development' && {
+    onDemandEntries: {
+      maxInactiveAge: 0,
+      pagesBufferLength: 1,
+    },
+    async headers() {
+      return [
+        {
+          source: '/api/:path*',
+          headers: [
+            {
+              key: 'Cache-Control',
+              value: 'no-cache, no-store, must-revalidate',
+            },
+            {
+              key: 'Pragma',
+              value: 'no-cache',
+            },
+            {
+              key: 'Expires',
+              value: '0',
+            },
+          ],
+        },
+      ];
+    },
+  }),
 };
 
 export default nextConfig;

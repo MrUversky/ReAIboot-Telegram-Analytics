@@ -6,6 +6,21 @@
 
 ## React Компоненты
 
+### ApiErrorBoundary
+
+**Файл:** `reai-boot-ui/src/components/ApiErrorBoundary.tsx`
+
+**Описание:** Has Props interface; Uses hooks: useState, useEffect
+
+**Тип:** React компонент
+
+**Назначение:** [Требуется описание]
+
+**Props:** [Требуется анализ]
+
+**Состояние:** [Требуется анализ]
+
+
 Здесь описаны основные React компоненты системы.
 
 ## API Интеграции

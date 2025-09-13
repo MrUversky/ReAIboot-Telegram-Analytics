@@ -71,7 +71,7 @@ source venv/bin/activate
 ./start_project.sh
 
 # Или по отдельности:
-python run_api.py &  # Backend
+python scripts/run_api.py &  # Backend
 cd reai-boot-ui && npm run dev  # Frontend
 ```
 

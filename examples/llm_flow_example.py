@@ -6,13 +6,13 @@
 sandbox_post_data = {
     "id": "12437_@dnevteh",
     "message_id": 12437,
-    "channel_username": "@dnevteh", 
+    "channel_username": "@dnevteh",
     "channel_title": "Дневник Технаря",
     "text": "**Эмодзи клоуна — официально признали ОСКОРБЛЕНИЕМ в России.** Это [доказали](https://rg.ru/2025/09/11/obidno-no-prilichno.html) в суде Красноярска.\n\nВ Красноярске женщина поскандалила с соседкой в доме через общий чат. В ответ на её сообщения та отправила смайлик-клоуна. Обращение дошло до суда, где решили, что такой стикер оскорбляет достоинство. \n\nИтог — девушке назначили штраф в 5 тысяч рублей.\n\nПозже решение смягчили, но теперь использовать клоуна в чатах опасно — реакцию могут засчитать как оскорбление.\n\n@dnevteh",
     "views": 32,
     "forwards": 2,
     "reactions": 0,
-    "date": "2025-09-11T09:27:06+00:00"
+    "date": "2025-09-11T09:27:06+00:00",
 }
 
 print("=== ДАННЫЕ ИЗ ПЕСОЧНИЦЫ ===")
@@ -38,7 +38,7 @@ channel_title = sandbox_post_data.get("channel_title", "")
 print("Извлеченные данные для фильтрации:")
 print(f"- post_text: {post_text[:50]}...")
 print(f"- views: {views}")
-print(f"- reactions: {reactions}") 
+print(f"- reactions: {reactions}")
 print(f"- replies: {replies}")
 print(f"- forwards: {forwards}")
 print(f"- channel_title: {channel_title}")
@@ -120,6 +120,8 @@ print()
 
 print("=== ЗАКЛЮЧЕНИЕ ===")
 print("✅ Данные из песочницы корректно собираются")
-print("✅ Все необходимые поля (text, views, reactions, forwards, channel_title) присутствуют")
+print(
+    "✅ Все необходимые поля (text, views, reactions, forwards, channel_title) присутствуют"
+)
 print("✅ Данные правильно передаются в LLM процессоры")
 print("✅ Формат данных соответствует тому, что используется на проде")

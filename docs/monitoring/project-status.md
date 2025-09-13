@@ -53,7 +53,7 @@
 
 # Или вручную:
 source venv/bin/activate
-python run_api.py &
+python scripts/run_api.py &
 
 cd reai-boot-ui
 npm run dev

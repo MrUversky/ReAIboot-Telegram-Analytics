@@ -8,7 +8,7 @@
 source venv/bin/activate
 
 # Запуск API сервера
-python run_api.py
+python scripts/run_api.py
 
 # Проверка работы
 curl http://localhost:8001/health
@@ -86,7 +86,7 @@ services:
   github:
     repo: MrUversky/ReAIboot-Telegram-Analytics
     branch: main
-  run_command: python run_api.py
+  run_command: python scripts/run_api.py
   environment_slug: python
   instance_count: 1
   instance_size_slug: basic-xxs

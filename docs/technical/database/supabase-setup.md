@@ -68,10 +68,10 @@ NEXT_PUBLIC_API_URL=http://localhost:8001
 source venv/bin/activate
 
 # Запуск всего проекта
-./start_project.sh
+.scripts/start_project.sh
 
 # Или по отдельности:
-python run_api.py &  # Backend
+python scripts/run_api.py &  # Backend
 cd reai-boot-ui && npm run dev  # Frontend
 ```
 
@@ -116,8 +116,9 @@ cd reai-boot-ui && npm run dev  # Frontend
 ```bash
 # В Supabase Dashboard → Table Editor
 # Проверьте что все таблицы созданы:
-# - profiles, channels, posts, post_analysis, scenarios
-# - token_usage, system_logs, parsing_sessions
+# - profiles, channels, posts, post_metrics, rubrics, reel_formats, rubric_formats
+# - post_analysis, scenarios, system_logs, token_usage, parsing_sessions
+# - llm_prompts, system_settings, channel_baselines
 ```
 
 ### Тест API

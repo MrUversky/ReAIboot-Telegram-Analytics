@@ -60,7 +60,7 @@ export default defineConfig({
   //     reuseExistingServer: !process.env.CI,
   //   },
   //   {
-  //     command: 'cd .. && source venv_py39/bin/activate && ./venv_py39/bin/python run_api.py',
+  //     command: 'cd .. && source venv_py39/bin/activate && ./venv_py39/bin/python scripts/run_api.py',
   //     url: 'http://localhost:8000',
   //     reuseExistingServer: !process.env.CI,
   //   },
