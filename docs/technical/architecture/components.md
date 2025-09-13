@@ -6,6 +6,19 @@
 
 ## Классы и компоненты
 
+### DocumentationAgent
+
+**Файл:** `.cursorrules/update_docs.py`
+
+**Описание:** Docstring:     """Main class for documentation updates"""      def __init__(self, project_root: str):         self.project_root = Path(project_root)         self.docs_root = self.project_root / "docs"         se...; Has __init__ method
+
+**Назначение:** [Требуется описание]
+
+**Методы:** [Требуется описание]
+
+**Зависимости:** [Требуется анализ]
+
+
 ### HealthResponse
 
 **Файл:** `src/api_main.py`
@@ -35,6 +48,20 @@
 Здесь описаны основные классы системы и их назначение.
 
 ## Функции
+
+### main
+
+**Файл:** `.cursorrules/update_docs.py`
+
+**Сигнатура:** No additional info
+
+**Назначение:** [Требуется описание]
+
+**Параметры:**
+- [Требуется анализ параметров]
+
+**Возвращаемое значение:** [Требуется анализ]
+
 
 Здесь описаны ключевые функции и их роль в системе.
 

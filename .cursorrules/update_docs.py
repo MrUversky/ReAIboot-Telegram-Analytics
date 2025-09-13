@@ -12,14 +12,27 @@ import logging
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass  # dotenv optional
+
+print("🚀 Starting documentation agent...")
+print("📦 Imported modules, setting up logging...")
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+print("✅ Logging configured")
 logger = logging.getLogger(__name__)
 
 
@@ -50,19 +63,37 @@ class DocumentationAgent:
         self.docs_root = self.project_root / "docs"
         self.api_docs_root = self.docs_root / "technical" / "api" / "endpoints"
 
+        # Performance metrics
+        self.metrics = {
+            "start_time": None,
+            "end_time": None,
+            "files_analyzed": 0,
+            "changes_found": 0,
+            "updates_applied": 0,
+            "errors": [],
+        }
+
     def analyze_changes(self, changed_files: List[str]) -> List[CodeChange]:
         """Analyze changed files and extract relevant changes"""
+        print(f"🔬 analyze_changes called with {len(changed_files)} files")
         changes = []
+        self.metrics["start_time"] = time.time()
+        self.metrics["files_analyzed"] = len(changed_files)
 
-        for file_path in changed_files:
+        for i, file_path in enumerate(changed_files):
+            print(f"📁 Analyzing file {i+1}/{len(changed_files)}: {file_path}")
             full_path = self.project_root / file_path
 
             if not full_path.exists():
+                print(f"⚠️ File not found: {file_path}")
                 continue
 
             # Analyze file based on type
             if file_path.endswith(".py"):
                 file_changes = self._analyze_python_file(file_path, full_path)
+                changes.extend(file_changes)
+            elif file_path.endswith((".js", ".ts", ".tsx")):
+                file_changes = self._analyze_javascript_file(file_path, full_path)
                 changes.extend(file_changes)
             elif file_path.endswith(".sql"):
                 file_changes = self._analyze_sql_file(file_path, full_path)
@@ -78,6 +109,11 @@ class DocumentationAgent:
                 )
                 changes.extend(business_changes)
 
+        # Update metrics
+        self.metrics["changes_found"] = len(changes)
+        self.metrics["end_time"] = time.time()
+
+        print(f"✅ analyze_changes completed, found {len(changes)} changes")
         return changes
 
     def _analyze_python_file(self, file_path: str, full_path: Path) -> List[CodeChange]:
@@ -163,6 +199,103 @@ class DocumentationAgent:
         )
 
         return changes
+
+    def _analyze_javascript_file(
+        self, file_path: str, full_path: Path
+    ) -> List[CodeChange]:
+        """Analyze JavaScript/TypeScript file for components and functions"""
+        changes = []
+
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        lines = content.split("\n")
+
+        # Find React components (function/class components)
+        component_patterns = [
+            r"^function\s+(\w+)\s*\(",  # Function components
+            r"^const\s+(\w+)\s*=\s*\(",  # Arrow function components
+            r"^export\s+(?:default\s+)?function\s+(\w+)",  # Exported functions
+            r"^export\s+(?:const|function)\s+(\w+)",  # Export declarations
+        ]
+
+        for i, line in enumerate(lines):
+            for pattern in component_patterns:
+                match = re.match(pattern, line.strip())
+                if match:
+                    component_name = match.group(1)
+                    if not component_name.startswith("_"):  # Skip private components
+                        component_info = self._extract_js_component_info(content, i)
+                        changes.append(
+                            CodeChange(
+                                file_path=file_path,
+                                change_type="frontend_component",
+                                content=f"Component: {component_name}\nInfo: {component_info}",
+                                line_number=i + 1,
+                            )
+                        )
+                        break  # Only add once per component
+
+        # Find API calls and external integrations
+        api_patterns = [
+            r"fetch\s*\(",
+            r"axios\.",
+            r"api\.",
+            r"\.post\s*\(",
+            r"\.get\s*\(",
+        ]
+
+        for pattern in api_patterns:
+            for match in re.finditer(pattern, content):
+                line_number = content[: match.start()].count("\n") + 1
+                context = self._get_context_lines(lines, line_number - 1, 2)
+                changes.append(
+                    CodeChange(
+                        file_path=file_path,
+                        change_type="frontend_component",
+                        content=f"API call: {match.group()}\nContext: {context}",
+                        line_number=line_number,
+                    )
+                )
+
+        return changes
+
+    def _extract_js_component_info(
+        self, content: str, component_line_index: int
+    ) -> str:
+        """Extract basic information about a JS/TS component"""
+        lines = content.split("\n")
+        info = []
+
+        # Look for props interface or type
+        for i in range(
+            component_line_index - 5, min(component_line_index + 10, len(lines))
+        ):
+            if i >= 0:
+                line = lines[i].strip()
+                if "interface" in line and "Props" in line:
+                    info.append("Has Props interface")
+                    break
+                elif "type" in line and "=" in line:
+                    info.append("Has type definition")
+                    break
+
+        # Check for hooks usage
+        component_end = min(component_line_index + 50, len(lines))
+        component_content = "\n".join(lines[component_line_index:component_end])
+
+        hooks = []
+        if "useState" in component_content:
+            hooks.append("useState")
+        if "useEffect" in component_content:
+            hooks.append("useEffect")
+        if "useContext" in component_content:
+            hooks.append("useContext")
+
+        if hooks:
+            info.append(f"Uses hooks: {', '.join(hooks)}")
+
+        return "; ".join(info) if info else "Frontend component"
 
     def _analyze_business_logic_file(
         self, file_path: str, full_path: Path
@@ -385,6 +518,10 @@ class DocumentationAgent:
                     updates.append(update)
             elif change.change_type == "business_logic":
                 update = self._generate_architecture_docs(change)
+                if update:
+                    updates.append(update)
+            elif change.change_type == "frontend_component":
+                update = self._generate_frontend_docs(change)
                 if update:
                     updates.append(update)
             elif change.change_type == "configuration":
@@ -785,8 +922,151 @@ Frontend (Next.js) <-> API (FastAPI) <-> LLM Services <-> Database (Supabase)
             logger.warning(f"Failed to generate AI description: {e}")
             return None
 
+    def _generate_frontend_docs(
+        self, change: CodeChange
+    ) -> Optional[DocumentationUpdate]:
+        """Generate frontend documentation for components"""
+        lines = change.content.split("\n")
+        component_type = None
+        component_name = None
+        component_info = None
+
+        for line in lines:
+            if line.startswith("Component: "):
+                component_type = "component"
+                component_name = line.replace("Component: ", "")
+            elif line.startswith("API call: "):
+                component_type = "api_call"
+                component_name = line.replace("API call: ", "")
+            elif line.startswith("Info: ") or line.startswith("Context: "):
+                component_info = line.replace("Info: ", "").replace("Context: ", "")
+
+        if not component_type or not component_name:
+            return None
+
+        # Create frontend docs directory
+        docs_path = self.docs_root / "technical" / "frontend" / "components.md"
+        docs_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Check if docs file exists
+        if docs_path.exists():
+            with open(docs_path, "r", encoding="utf-8") as f:
+                current_content = f.read()
+
+            # Check if component already documented
+            if f"### {component_name}" in current_content:
+                logger.info(f"Frontend component {component_name} already documented")
+                return None
+
+            change_type = "update"
+        else:
+            # Create new frontend file
+            current_content = self._create_frontend_template()
+            change_type = "create"
+
+        # Generate component documentation
+        component_docs = self._generate_frontend_component_docs(
+            component_type, component_name, component_info, change.file_path
+        )
+
+        # Add to appropriate section
+        section = (
+            "React Компоненты" if component_type == "component" else "API Интеграции"
+        )
+        if f"## {section}" in current_content:
+            section_pattern = f"## {section}\n"
+            insert_position = current_content.find(section_pattern) + len(
+                section_pattern
+            )
+            updated_content = (
+                current_content[:insert_position]
+                + "\n"
+                + component_docs
+                + "\n"
+                + current_content[insert_position:]
+            )
+        else:
+            updated_content = current_content + f"\n## {section}\n\n{component_docs}\n"
+
+        return DocumentationUpdate(
+            file_path=str(docs_path), change_type=change_type, content=updated_content
+        )
+
+    def _create_frontend_template(self) -> str:
+        """Create template for frontend documentation"""
+        return """# Frontend Компоненты
+
+## Обзор
+
+Этот документ описывает компоненты и интеграции frontend части системы ReAIboot.
+
+## React Компоненты
+
+Здесь описаны основные React компоненты системы.
+
+## API Интеграции
+
+Здесь описаны интеграции с backend API и внешними сервисами.
+
+## Архитектура Frontend
+
+```
+React Components <-> API Layer <-> Backend Services
+```
+
+## Технологии
+
+- **React** - UI фреймворк
+- **TypeScript** - типизация
+- **Next.js** - React фреймворк
+- **Tailwind CSS** - стилизация
+"""
+
+    def _generate_frontend_component_docs(
+        self,
+        component_type: str,
+        component_name: str,
+        component_info: str,
+        file_path: str,
+    ) -> str:
+        """Generate documentation for frontend component"""
+
+        if component_type == "component":
+            return f"""### {component_name}
+
+**Файл:** `{file_path}`
+
+**Описание:** {component_info}
+
+**Тип:** React компонент
+
+**Назначение:** [Требуется описание]
+
+**Props:** [Требуется анализ]
+
+**Состояние:** [Требуется анализ]
+"""
+
+        elif component_type == "api_call":
+            return f"""### API вызов: {component_name}
+
+**Файл:** `{file_path}`
+
+**Контекст:** {component_info}
+
+**Тип вызова:** [GET/POST/PUT/DELETE]
+
+**Эндпоинт:** [Требуется анализ]
+
+**Назначение:** [Требуется описание]
+"""
+
+        return f"### {component_name}\n\nДокументация в разработке.\n"
+
     def apply_updates(self, updates: List[DocumentationUpdate]) -> None:
         """Apply documentation updates to files"""
+        self.metrics["updates_applied"] = len(updates)
+
         for update in updates:
             docs_path = Path(update.file_path)
 
@@ -801,8 +1081,237 @@ Frontend (Next.js) <-> API (FastAPI) <-> LLM Services <-> Database (Supabase)
                 f"{'Created' if update.change_type == 'create' else 'Updated'} {update.file_path}"
             )
 
+        # Generate metrics report
+        self._generate_metrics_report()
+
+        # Create documentation dashboard
+        self._create_documentation_dashboard()
+
+    def _generate_metrics_report(self) -> None:
+        """Generate performance metrics report"""
+        if not self.metrics["start_time"] or not self.metrics["end_time"]:
+            return
+
+        processing_time = self.metrics["end_time"] - self.metrics["start_time"]
+        docs_path = self.docs_root / "metrics" / "performance.md"
+        docs_path.parent.mkdir(parents=True, exist_ok=True)
+
+        report = f"""# Метрики производительности документации
+
+## Обзор
+
+Автоматически сгенерированный отчет о работе системы обновления документации.
+
+## Статистика выполнения
+
+- **Время обработки:** {processing_time:.2f} секунд
+- **Файлов проанализировано:** {self.metrics["files_analyzed"]}
+- **Изменений найдено:** {self.metrics["changes_found"]}
+- **Документов обновлено:** {self.metrics["updates_applied"]}
+- **Ошибок:** {len(self.metrics["errors"])}
+
+## Детали анализа
+
+### По типам файлов:
+- **Python файлы:** API эндпоинты, классы, функции, LLM взаимодействия
+- **JavaScript/TypeScript:** React компоненты, API вызовы
+- **SQL файлы:** Схемы базы данных
+- **YAML файлы:** Конфигурации
+
+### По типам изменений:
+- **API endpoints:** Новые и измененные эндпоинты
+- **Business logic:** Классы, методы, LLM интеграции
+- **Frontend components:** React компоненты и API интеграции
+- **Configuration:** Изменения настроек
+
+## Ошибки и предупреждения
+
+{chr(10).join(f"- {error}" for error in self.metrics["errors"]) if self.metrics["errors"] else "Ошибок не обнаружено"}
+
+## Системная информация
+
+- **Дата генерации:** {time.strftime('%Y-%m-%d %H:%M:%S')}
+- **Версия Python:** {sys.version.split()[0]}
+- **Платформа:** {sys.platform}
+
+---
+*Этот отчет генерируется автоматически при каждом обновлении документации.*
+"""
+
+        with open(docs_path, "w", encoding="utf-8") as f:
+            f.write(report)
+
+        logger.info(f"Performance metrics report generated: {docs_path}")
+
+    def _create_documentation_dashboard(self) -> None:
+        """Create a simple documentation dashboard"""
+        dashboard_path = self.docs_root / "DASHBOARD.md"
+
+        # Collect information about all documentation files
+        docs_structure = self._analyze_docs_structure()
+
+        dashboard = f"""# 📚 Documentation Dashboard - ReAIboot
+
+## Обзор системы документации
+
+Добро пожаловать в централизованный dashboard документации проекта ReAIboot!
+
+## 📊 Метрики проекта
+
+{self._get_project_metrics()}
+
+## 📁 Структура документации
+
+### Business Documentation
+{docs_structure.get('business', 'В разработке')}
+
+### Technical Documentation
+{docs_structure.get('technical', 'В разработке')}
+
+### User Guides
+{docs_structure.get('user_guides', 'В разработке')}
+
+### Templates
+{docs_structure.get('templates', 'В разработке')}
+
+## 🔍 Быстрый поиск
+
+### По категориям:
+- [API Documentation](./technical/api/overview.md) - Все API эндпоинты
+- [Architecture](./technical/architecture/components.md) - Архитектура системы
+- [Frontend](./technical/frontend/components.md) - React компоненты
+- [LLM Guide](./LLM_README.md) - Руководство для ИИ
+
+### По типам:
+- 🔧 **Техническая документация** - API, архитектура, база данных
+- 💼 **Бизнес документация** - требования, аудитория, конкуренты
+- 👥 **Пользовательские гайды** - инструкции, примеры использования
+- 🤖 **LLM документация** - специальное руководство для ИИ
+
+## 🚀 Быстрые действия
+
+### Для разработчиков:
+1. **Обновить документацию:** `python .cursorrules/update_docs.py --all`
+2. **Проверить изменения:** `python .cursorrules/update_docs.py --dry-run --files src/`
+3. **Посмотреть метрики:** [Performance Metrics](./metrics/performance.md)
+
+### Для LLM:
+1. **Прочитать LLM_README.md** - полное понимание проекта
+2. **Изучить API** - все доступные эндпоинты
+3. **Посмотреть архитектуру** - компоненты и взаимодействия
+
+## 📈 Статус документации
+
+### ✅ Автоматически обновляемые разделы:
+- API эндпоинты (FastAPI)
+- Архитектурные компоненты
+- LLM интеграции
+- Frontend компоненты
+
+### 🔄 Требующие ручного обновления:
+- Бизнес-требования
+- Пользовательские гайды
+- Дизайн-документы
+
+## 🔗 Полезные ссылки
+
+- [GitHub Repository](https://github.com/MrUversky/ReAIboot-Telegram-Analytics)
+- [API Swagger](http://localhost:8000/api/docs) (при запущенном сервере)
+- [Performance Metrics](./metrics/performance.md)
+
+---
+
+## 💡 Советы по использованию
+
+### Для быстрого старта:
+1. Начните с [LLM_README.md](./LLM_README.md) если вы ИИ
+2. Посмотрите [Architecture Overview](./technical/architecture/components.md)
+3. Ознакомьтесь с [API Endpoints](./technical/api/overview.md)
+
+### Для глубокого понимания:
+1. Изучите [Business Documentation](./business/overview.md)
+2. Прочитайте [User Guides](./user-guides/getting-started.md)
+3. Посмотрите [Performance Metrics](./metrics/performance.md)
+
+---
+
+*Dashboard обновляется автоматически при изменениях в документации*
+*Последнее обновление: {time.strftime('%Y-%m-%d %H:%M:%S')}*
+"""
+
+        with open(dashboard_path, "w", encoding="utf-8") as f:
+            f.write(dashboard)
+
+        logger.info(f"Documentation dashboard created: {dashboard_path}")
+
+    def _analyze_docs_structure(self) -> Dict[str, str]:
+        """Analyze the structure of documentation"""
+        structure = {}
+
+        # Business docs
+        business_files = list((self.docs_root / "business").glob("*.md"))
+        if business_files:
+            structure["business"] = "\n".join(
+                f"- [{f.stem.title()}](./business/{f.name})" for f in business_files
+            )
+
+        # Technical docs
+        technical_dirs = ["api", "architecture", "database", "deployment", "frontend"]
+        technical_content = []
+        for dir_name in technical_dirs:
+            dir_path = self.docs_root / "technical" / dir_name
+            if dir_path.exists():
+                files = list(dir_path.glob("*.md"))
+                if files:
+                    technical_content.append(f"**{dir_name.title()}:**")
+                    technical_content.extend(
+                        f"  - [{f.stem.replace('_', ' ').title()}](./technical/{dir_name}/{f.name})"
+                        for f in files
+                    )
+
+        if technical_content:
+            structure["technical"] = "\n".join(technical_content)
+
+        # User guides
+        user_guide_files = list((self.docs_root / "user-guides").glob("*.md"))
+        if user_guide_files:
+            structure["user_guides"] = "\n".join(
+                f"- [{f.stem.replace('-', ' ').title()}](./user-guides/{f.name})"
+                for f in user_guide_files
+            )
+
+        # Templates
+        template_files = list((self.docs_root / "templates").glob("*.md"))
+        if template_files:
+            structure["templates"] = "\n".join(
+                f"- [{f.stem.replace('-', ' ').title()}](./templates/{f.name})"
+                for f in template_files
+            )
+
+        return structure
+
+    def _get_project_metrics(self) -> str:
+        """Get basic project metrics"""
+        total_docs = len(list(self.docs_root.glob("**/*.md")))
+        api_endpoints = len(
+            list((self.docs_root / "technical" / "api" / "endpoints").glob("*.md"))
+        )
+        components = len(
+            list((self.docs_root / "technical" / "architecture").glob("*.md"))
+        )
+
+        return f"""
+- **Всего документов:** {total_docs}
+- **API эндпоинтов:** {api_endpoints}
+- **Архитектурных компонентов:** {components}
+- **Время последнего анализа:** {time.strftime('%H:%M:%S')}
+- **Статус системы:** ✅ Активна
+"""
+
 
 def main():
+    print("🎯 Entered main() function")
+
     parser = argparse.ArgumentParser(
         description="Auto-update documentation based on code changes"
     )
@@ -820,7 +1329,10 @@ def main():
     script_dir = Path(__file__).parent.parent
     project_root = script_dir
 
+    print(f"🏗️ Created DocumentationAgent for project: {project_root}")
+
     agent = DocumentationAgent(str(project_root))
+    print("✅ DocumentationAgent initialized")
 
     if args.all:
         # Analyze all Python files
@@ -850,14 +1362,19 @@ def main():
         logger.info("No files to analyze")
         return
 
+    print(f"🔍 Analyzing {len(changed_files)} files...")
     logger.info(f"Analyzing {len(changed_files)} files...")
 
     # Analyze changes
+    print("📊 Starting analyze_changes...")
     changes = agent.analyze_changes(changed_files)
+    print(f"✅ Found {len(changes)} changes")
     logger.info(f"Found {len(changes)} relevant changes")
 
     # Generate updates
+    print("📝 Starting generate_documentation_updates...")
     updates = agent.generate_documentation_updates(changes)
+    print(f"✅ Generated {len(updates)} documentation updates")
     logger.info(f"Generated {len(updates)} documentation updates")
 
     if args.dry_run:
@@ -866,10 +1383,15 @@ def main():
         return
 
     # Apply updates
+    print("💾 Starting apply_updates...")
     agent.apply_updates(updates)
+    print("✅ Updates applied")
 
     logger.info("Documentation update completed!")
+    print("🎉 Documentation update completed!")
 
 
 if __name__ == "__main__":
+    print("🚀 Script started via __main__")
     main()
+    print("🏁 Script finished")
