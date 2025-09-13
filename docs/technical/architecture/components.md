@@ -6,6 +6,19 @@
 
 ## Классы и компоненты
 
+### AnalysisProcessor
+
+**Файл:** `src/app/llm/analysis_processor.py`
+
+**Описание:** Docstring:     """Процессор для анализа постов с помощью Claude."""      def __init__(self):         """Инициализирует процессор анализа."""...; Has __init__ method
+
+**Назначение:** [Требуется описание]
+
+**Методы:** [Требуется описание]
+
+**Зависимости:** [Требуется анализ]
+
+
 ### DocumentationAgent
 
 **Файл:** `.cursorrules/update_docs.py`

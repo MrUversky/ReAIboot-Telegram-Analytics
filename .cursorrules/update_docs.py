@@ -24,15 +24,11 @@ try:
 except ImportError:
     pass  # dotenv optional
 
-print("🚀 Starting documentation agent...")
-print("📦 Imported modules, setting up logging...")
-
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-print("✅ Logging configured")
 logger = logging.getLogger(__name__)
 
 
@@ -75,17 +71,14 @@ class DocumentationAgent:
 
     def analyze_changes(self, changed_files: List[str]) -> List[CodeChange]:
         """Analyze changed files and extract relevant changes"""
-        print(f"🔬 analyze_changes called with {len(changed_files)} files")
         changes = []
         self.metrics["start_time"] = time.time()
         self.metrics["files_analyzed"] = len(changed_files)
 
         for i, file_path in enumerate(changed_files):
-            print(f"📁 Analyzing file {i+1}/{len(changed_files)}: {file_path}")
             full_path = self.project_root / file_path
 
             if not full_path.exists():
-                print(f"⚠️ File not found: {file_path}")
                 continue
 
             # Analyze file based on type
@@ -113,7 +106,6 @@ class DocumentationAgent:
         self.metrics["changes_found"] = len(changes)
         self.metrics["end_time"] = time.time()
 
-        print(f"✅ analyze_changes completed, found {len(changes)} changes")
         return changes
 
     def _analyze_python_file(self, file_path: str, full_path: Path) -> List[CodeChange]:
@@ -1310,8 +1302,6 @@ React Components <-> API Layer <-> Backend Services
 
 
 def main():
-    print("🎯 Entered main() function")
-
     parser = argparse.ArgumentParser(
         description="Auto-update documentation based on code changes"
     )
@@ -1329,10 +1319,7 @@ def main():
     script_dir = Path(__file__).parent.parent
     project_root = script_dir
 
-    print(f"🏗️ Created DocumentationAgent for project: {project_root}")
-
     agent = DocumentationAgent(str(project_root))
-    print("✅ DocumentationAgent initialized")
 
     if args.all:
         # Analyze all Python files
@@ -1362,19 +1349,14 @@ def main():
         logger.info("No files to analyze")
         return
 
-    print(f"🔍 Analyzing {len(changed_files)} files...")
     logger.info(f"Analyzing {len(changed_files)} files...")
 
     # Analyze changes
-    print("📊 Starting analyze_changes...")
     changes = agent.analyze_changes(changed_files)
-    print(f"✅ Found {len(changes)} changes")
     logger.info(f"Found {len(changes)} relevant changes")
 
     # Generate updates
-    print("📝 Starting generate_documentation_updates...")
     updates = agent.generate_documentation_updates(changes)
-    print(f"✅ Generated {len(updates)} documentation updates")
     logger.info(f"Generated {len(updates)} documentation updates")
 
     if args.dry_run:
@@ -1383,15 +1365,10 @@ def main():
         return
 
     # Apply updates
-    print("💾 Starting apply_updates...")
     agent.apply_updates(updates)
-    print("✅ Updates applied")
 
     logger.info("Documentation update completed!")
-    print("🎉 Documentation update completed!")
 
 
 if __name__ == "__main__":
-    print("🚀 Script started via __main__")
     main()
-    print("🏁 Script finished")

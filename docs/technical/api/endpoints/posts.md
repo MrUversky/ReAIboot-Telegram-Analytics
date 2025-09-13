@@ -333,3 +333,23 @@ Location: Unknown
 ---
 
 *Сгенерировано автоматически: 2025-09-13 15:36:28*
+
+
+## Calculate Viral All Posts
+
+**Эндпоинт:** `POST /api/posts/calculate-viral-all`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта calculate_viral_all_posts.
+
+### Детали реализации
+```
+Function: calculate_viral_all_posts
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-13 16:04:54*

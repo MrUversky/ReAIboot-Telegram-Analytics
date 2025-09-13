@@ -41,6 +41,19 @@
 
 ## Интеграция с LLM
 
+### Интеграция: Processor(BaseLLM
+
+**Файл:** `src/app/llm/analysis_processor.py`
+
+**Контекст:** logger = setup_logger(__name__)
+
+**Тип взаимодействия:** [API вызов / Обработка ответа / Управление промптами]
+
+**Модель:** [Claude / GPT / другая]
+
+**Назначение:** [Требуется описание]
+
+
 ### Интеграция: LLM.*process|process
 
 **Файл:** `.cursorrules/update_docs.py`
