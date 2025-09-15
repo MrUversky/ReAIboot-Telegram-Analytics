@@ -110,8 +110,12 @@ export default function PostsPage() {
       filters.min_viral_score = minViralScore
     }
 
+    // Параметры сортировки
+    filters.sort_by = sortBy
+    filters.sort_order = sortOrder
+
     return filters
-  }, [filterChannel, dateRange, minViews, minEngagement, debouncedSearchTerm, showOnlyViral, minViralScore])
+  }, [filterChannel, dateRange, minViews, minEngagement, debouncedSearchTerm, showOnlyViral, minViralScore, sortBy, sortOrder])
 
   // Debounce для поискового запроса (ждем 500мс после последнего ввода)
   useEffect(() => {
@@ -223,25 +227,6 @@ export default function PostsPage() {
     }
   }, [user, loading, router])
 
-  useEffect(() => {
-    if (user) {
-      loadPosts(true)
-      loadGlobalStats()
-    }
-  }, [user, loadPosts])
-
-  // Reload posts and stats when filters change (debounced)
-  useEffect(() => {
-    if (user) {
-      const timeoutId = setTimeout(() => {
-        loadPosts(true)
-        loadGlobalStats()
-      }, 300) // Debounce на 300ms
-
-      return () => clearTimeout(timeoutId)
-    }
-  }, [user, dateRange, minViews, minEngagement, filterChannel, debouncedSearchTerm])
-
   // IntersectionObserver для infinite scroll
   useEffect(() => {
     let isLoading = false // Флаг для предотвращения множественных вызовов
@@ -349,6 +334,38 @@ export default function PostsPage() {
     }
   }
 
+  // ===== USE EFFECTS =====
+
+  // Перезагрузка постов при изменении сортировки
+  useEffect(() => {
+    loadPosts(true)
+  }, [sortBy, sortOrder, loadPosts])
+
+  // Перезагрузка статистики при изменении фильтров
+  useEffect(() => {
+    loadGlobalStats()
+  }, [filterChannel, dateRange, minViews, minEngagement, showOnlyViral, minViralScore, sortBy, sortOrder, loadGlobalStats])
+
+  // Загрузка постов при авторизации пользователя
+  useEffect(() => {
+    if (user) {
+      loadPosts(true)
+      loadGlobalStats()
+    }
+  }, [user, loadPosts])
+
+  // Reload posts and stats when filters change (debounced)
+  useEffect(() => {
+    if (user) {
+      const timeoutId = setTimeout(() => {
+        loadPosts(true)
+        loadGlobalStats()
+      }, 300) // Debounce на 300ms
+
+      return () => clearTimeout(timeoutId)
+    }
+  }, [user, dateRange, minViews, minEngagement, filterChannel, debouncedSearchTerm])
+
   const handleAnalyzePost = async (post: Post) => {
     // Полный анализ: открываем модальное окно для 4-этапного анализа
     setAnalyzingPost(post)
@@ -360,44 +377,7 @@ export default function PostsPage() {
     loadPosts(true)
   }
 
-  const filteredAndSortedPosts = posts
-    .sort((a, b) => {
-      let aValue: number, bValue: number
-
-      switch (sortBy) {
-        case 'score':
-          aValue = a.score || 0
-          bValue = b.score || 0
-          break
-        case 'views':
-          aValue = a.views
-          bValue = b.views
-          break
-        case 'viral_score':
-          aValue = a.viral_score || 0
-          bValue = b.viral_score || 0
-          break
-        case 'engagement_rate':
-          aValue = (a.engagement_rate || 0) * 100
-          bValue = (b.engagement_rate || 0) * 100
-          break
-        case 'forwards':
-          aValue = a.forwards
-          bValue = b.forwards
-          break
-        case 'reactions':
-          aValue = a.reactions
-          bValue = b.reactions
-          break
-        case 'date':
-        default:
-          aValue = new Date(a.date).getTime()
-          bValue = new Date(b.date).getTime()
-          break
-      }
-
-      return sortOrder === 'asc' ? aValue - bValue : bValue - aValue
-    })
+  const filteredAndSortedPosts = posts // Сортировка теперь происходит на сервере
 
   const getTopPosts = () => {
     return posts
@@ -770,4 +750,3 @@ export default function PostsPage() {
     </div>
   )
 }
-

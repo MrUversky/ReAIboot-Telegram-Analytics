@@ -298,3 +298,43 @@ Location: Unknown
 ---
 
 *Сгенерировано автоматически: 2025-09-16 00:13:50*
+
+
+## Create Channel
+
+**Эндпоинт:** `POST /api/channels`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта create_channel.
+
+### Детали реализации
+```
+Function: create_channel
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-16 00:14:43*
+
+
+## Cancel Parsing Session
+
+**Эндпоинт:** `PUT /api/parsing/session/{session_id}/cancel`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта cancel_parsing_session.
+
+### Детали реализации
+```
+Function: cancel_parsing_session
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-16 00:28:40*

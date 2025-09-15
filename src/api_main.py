@@ -1731,6 +1731,8 @@ async def get_posts(
     search_term: Optional[str] = None,
     only_viral: bool = False,
     min_viral_score: float = 1.0,
+    sort_by: str = "date",
+    sort_order: str = "desc",
 ):
     """Получить посты с метриками."""
     try:
@@ -1760,14 +1762,35 @@ async def get_posts(
         if only_viral:
             query = query.gte("viral_score", min_viral_score)
 
+        # Применяем сортировку
+        valid_sort_fields = {
+            "date",
+            "viral_score",
+            "views",
+            "engagement_rate",
+            "forwards",
+            "reactions",
+            "score",
+        }
+
+        if sort_by not in valid_sort_fields:
+            sort_by = "date"
+
+        if sort_order not in ["asc", "desc"]:
+            sort_order = "desc"
+
+        # Применяем сортировку
+        if sort_order == "desc":
+            query = query.order(sort_by, desc=True)
+        else:
+            query = query.order(sort_by, desc=False)
+
         # Получаем общее количество записей для определения has_more
         count_query = query
         count_result = count_query.execute()
         total_count = len(count_result.data) if count_result.data else 0
 
-        posts_result = (
-            query.order("date", desc=True).range(offset, offset + limit - 1).execute()
-        )
+        posts_result = query.range(offset, offset + limit - 1).execute()
         posts = posts_result.data or []
 
         # Определяем, есть ли еще записи

@@ -6,6 +6,32 @@
 
 ## Классы и компоненты
 
+### PromptUpdate
+
+**Файл:** `src/api_main.py`
+
+**Описание:** No additional info
+
+**Назначение:** [Требуется описание]
+
+**Методы:** [Требуется описание]
+
+**Зависимости:** [Требуется анализ]
+
+
+### ChannelBaselineAnalyzer
+
+**Файл:** `src/app/channel_baseline_analyzer.py`
+
+**Описание:** Docstring:     """Анализатор базовых метрик каналов."""      def __init__(self, supabase_manager: SupabaseManager):         """...; Has __init__ method
+
+**Назначение:** [Требуется описание]
+
+**Методы:** [Требуется описание]
+
+**Зависимости:** [Требуется анализ]
+
+
 ### SupabaseClient
 
 **Файл:** `src/app/supabase_client.py`
