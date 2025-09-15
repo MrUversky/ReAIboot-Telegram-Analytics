@@ -353,3 +353,23 @@ Location: Unknown
 ---
 
 *Сгенерировано автоматически: 2025-09-13 16:04:54*
+
+
+## Calculate Viral Metrics Batch
+
+**Эндпоинт:** `POST /api/posts/calculate-viral-metrics-batch`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта calculate_viral_metrics_batch.
+
+### Детали реализации
+```
+Function: calculate_viral_metrics_batch
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-16 00:13:50*

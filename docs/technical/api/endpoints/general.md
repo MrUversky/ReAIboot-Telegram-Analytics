@@ -178,3 +178,123 @@ Location: Unknown
 ---
 
 *Сгенерировано автоматически: 2025-09-13 21:02:59*
+
+
+## Create Channels From Folder
+
+**Эндпоинт:** `POST /api/channels/from-folder`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта create_channels_from_folder.
+
+### Детали реализации
+```
+Function: create_channels_from_folder
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-15 20:38:16*
+
+
+## Create Channels From User Folder
+
+**Эндпоинт:** `POST /api/channels/from-user-folder`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта create_channels_from_user_folder.
+
+### Детали реализации
+```
+Function: create_channels_from_user_folder
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-15 21:02:53*
+
+
+## Create Channels From User Channels
+
+**Эндпоинт:** `POST /api/channels/from-user-channels`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта create_channels_from_user_channels.
+
+### Детали реализации
+```
+Function: create_channels_from_user_channels
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-15 21:18:22*
+
+
+## Debug Folders
+
+**Эндпоинт:** `GET /api/debug/folders`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта debug_folders.
+
+### Детали реализации
+```
+Function: debug_folders
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-15 21:38:03*
+
+
+## Get User Folders
+
+**Эндпоинт:** `GET /api/folders`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта get_user_folders.
+
+### Детали реализации
+```
+Function: get_user_folders
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-15 21:56:45*
+
+
+## Get User Channels
+
+**Эндпоинт:** `GET /api/user-channels`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта get_user_channels.
+
+### Детали реализации
+```
+Function: get_user_channels
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-16 00:13:50*

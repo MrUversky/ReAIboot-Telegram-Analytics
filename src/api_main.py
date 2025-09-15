@@ -221,12 +221,9 @@ class ParsingResponse(BaseModel):
 class ChannelManagementRequest(BaseModel):
     username: str
     title: str
-    description: Optional[str] = None
     category: Optional[str] = None
     is_active: bool = True
     parse_frequency_hours: int = 24
-    max_posts_per_parse: int = 100
-    days_back: int = 7
 
 
 class HealthResponse(BaseModel):
@@ -490,7 +487,7 @@ async def reset_telegram_auth():
         # Удаляем файлы сессии
         import os
 
-        from .app.settings import settings
+        from app.settings import settings
 
         session_files = [
             f"{settings.telegram_session}.session",
@@ -652,7 +649,7 @@ async def generate_scenarios_from_analysis(request: Dict[str, Any]) -> Dict[str,
             )
 
             # Создаем фиктивный результат для сохранения сценариев
-            from .app.llm.orchestrator import OrchestratorResult, ProcessingStage
+            from app.llm.orchestrator import OrchestratorResult, ProcessingStage
 
             fake_result = OrchestratorResult(
                 post_id=f"{post_data['message_id']}_{post_data['channel_username']}",
@@ -1463,7 +1460,7 @@ async def get_channel_baselines():
             else:
                 # Канал без метрик - подсчитываем реальное количество постов
                 try:
-                    from .app.supabase_client import supabase_client
+                    from app.supabase_client import supabase_client
 
                     posts_count = (
                         supabase_manager.client.table("posts")
@@ -1532,7 +1529,7 @@ async def get_channel_baseline(channel_username: str):
 async def calculate_channel_baseline(channel_username: str):
     """Пересчитать базовые метрики канала."""
     try:
-        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
 
         analyzer = ChannelBaselineAnalyzer(supabase_manager)
         baseline = analyzer.calculate_channel_baseline(channel_username)
@@ -1566,7 +1563,7 @@ async def calculate_channel_baseline(channel_username: str):
 async def update_all_channel_baselines():
     """Обновить базовые метрики для всех каналов."""
     try:
-        from .app.smart_top_posts_filter import SmartTopPostsFilter
+        from app.smart_top_posts_filter import SmartTopPostsFilter
 
         filter = SmartTopPostsFilter(supabase_manager)
         channels = supabase_manager.get_channels_needing_baseline_update()
@@ -1591,7 +1588,7 @@ async def recalculate_all_baselines():
     try:
         import json
 
-        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
 
         analyzer = ChannelBaselineAnalyzer(supabase_manager)
 
@@ -1841,6 +1838,30 @@ async def get_posts(
         )
 
 
+@app.get("/api/posts/viral", tags=["posts"])
+async def get_viral_posts(
+    channel_username: Optional[str] = None,
+    min_viral_score: float = 1.5,
+    limit: int = 100,
+):
+    """Получить 'залетевшие' посты."""
+    try:
+        logger.info(
+            f"Получение viral постов: channel={channel_username}, min_score={min_viral_score}, limit={limit}"
+        )
+        posts = supabase_manager.get_viral_posts(
+            channel_username, min_viral_score, limit
+        )
+        logger.info(f"Найдено {len(posts)} viral постов")
+        result = {"posts": posts, "count": len(posts)}
+        logger.info(f"Возвращаем результат: {result}")
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Ошибка получения viral постов: {str(e)}"
+        )
+
+
 @app.get("/api/posts/{post_id}", tags=["posts"])
 async def get_single_post(post_id: str):
     """Получить один пост с оценкой."""
@@ -1897,31 +1918,13 @@ async def get_single_post(post_id: str):
         raise HTTPException(status_code=500, detail=f"Ошибка получения поста: {str(e)}")
 
 
-@app.get("/api/posts/viral", tags=["posts"])
-async def get_viral_posts(
-    channel_username: Optional[str] = None,
-    min_viral_score: float = 1.5,
-    limit: int = 100,
-):
-    """Получить 'залетевшие' посты."""
-    try:
-        posts = supabase_manager.get_viral_posts(
-            channel_username, min_viral_score, limit
-        )
-        return {"posts": posts, "count": len(posts)}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Ошибка получения viral постов: {str(e)}"
-        )
-
-
 @app.post("/api/debug/calculate-baseline", tags=["debug"])
 async def debug_calculate_baseline(channel_username: str):
     """Отладка: рассчитать базовые метрики канала."""
     try:
         import json
 
-        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
 
         logger.info(
             f"🔍 Начинаем отладку расчета базовых метрик для канала {channel_username}"
@@ -2042,8 +2045,8 @@ async def debug_calculate_single_post(post_id: str):
     try:
         import json
 
-        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-        from .app.viral_post_detector import ViralPostDetector
+        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from app.viral_post_detector import ViralPostDetector
 
         # Получаем данные поста
         post_result = (
@@ -2167,8 +2170,8 @@ async def calculate_viral_batch(channel_username: str = None, limit: int = 100):
     try:
         import json
 
-        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-        from .app.viral_post_detector import ViralPostDetector
+        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from app.viral_post_detector import ViralPostDetector
 
         logger.info(
             f"🚀 Начинаем массовый расчет виральности. Канал: {channel_username}, Лимит: {limit}"
@@ -2278,8 +2281,8 @@ async def calculate_viral_all_posts(channel_username: str = None):
     try:
         import json
 
-        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-        from .app.viral_post_detector import ViralPostDetector
+        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from app.viral_post_detector import ViralPostDetector
 
         logger.info(
             f"🚀 Начинаем массовый расчет виральности для ВСЕХ постов. Канал: {channel_username}"
@@ -2388,8 +2391,8 @@ async def calculate_viral_all_posts(channel_username: str = None):
 async def update_post_viral_metrics(post_id: str):
     """Пересчитать viral метрики для поста."""
     try:
-        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-        from .app.viral_post_detector import ViralPostDetector
+        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from app.viral_post_detector import ViralPostDetector
 
         # Получаем данные поста
         post_result = (
@@ -2440,12 +2443,12 @@ async def update_post_viral_metrics(post_id: str):
 # ===== ДОПОЛНИТЕЛЬНЫЕ API ЭНДПОИНТЫ ДЛЯ VIRAL DETECTION =====
 
 
-@app.post("/api/posts/calculate-viral-batch", tags=["posts"])
+@app.post("/api/posts/calculate-viral-metrics-batch", tags=["posts"])
 async def calculate_viral_metrics_batch(channel_username: str = None, limit: int = 100):
     """Пересчитать viral метрики для группы постов."""
     try:
-        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-        from .app.viral_post_detector import ViralPostDetector
+        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from app.viral_post_detector import ViralPostDetector
 
         # Получаем посты
         query = supabase_manager.client.table("posts").select("*")
@@ -2508,7 +2511,7 @@ async def ensure_channel_baseline(
 ):
     """Убедиться, что базовые метрики канала существуют и актуальны."""
     try:
-        from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
 
         analyzer = ChannelBaselineAnalyzer(supabase_manager)
 
@@ -2802,6 +2805,58 @@ async def get_parsing_session_status(session_id: int):
         )
 
 
+@app.get("/api/parsing/sessions", tags=["parsing"])
+async def get_parsing_sessions():
+    """
+    Получить список всех сессий парсинга.
+    """
+    try:
+        result = (
+            supabase_manager.client.table("parsing_sessions")
+            .select("*")
+            .order("started_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        return {"sessions": result.data}
+    except Exception as e:
+        logger.error(f"Ошибка получения сессий парсинга: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Ошибка получения сессий: {str(e)}"
+        )
+
+
+@app.put("/api/parsing/session/{session_id}/cancel", tags=["parsing"])
+async def cancel_parsing_session(session_id: int):
+    """
+    Отменить зависшую сессию парсинга.
+    """
+    try:
+        # Обновляем статус сессии на failed
+        result = (
+            supabase_manager.client.table("parsing_sessions")
+            .update(
+                {
+                    "status": "failed",
+                    "completed_at": datetime.now().isoformat(),
+                    "error_message": "Отменено администратором",
+                }
+            )
+            .eq("id", session_id)
+            .execute()
+        )
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Сессия парсинга не найдена")
+
+        logger.info(f"Сессия парсинга {session_id} отменена")
+        return {"message": f"Сессия {session_id} отменена"}
+
+    except Exception as e:
+        logger.error(f"Ошибка отмены сессии парсинга {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка отмены сессии: {str(e)}")
+
+
 @app.put("/api/channels/{channel_id}", tags=["channels"])
 async def update_channel_settings(channel_id: int, request: ChannelManagementRequest):
     """
@@ -2838,6 +2893,570 @@ async def delete_channel(channel_id: int):
     except Exception as e:
         logger.error(f"Ошибка удаления канала: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка удаления: {str(e)}")
+
+
+@app.post("/api/channels", tags=["channels"])
+async def create_channel(request: ChannelManagementRequest):
+    """
+    Создать новый канал для мониторинга.
+
+    - **username**: Username канала (может быть с @ или без, или ссылка)
+    - **title**: Название канала
+    - **description**: Описание канала (опционально)
+    - **category**: Категория канала (опционально)
+    - **is_active**: Активен ли канал (по умолчанию True)
+    - **parse_frequency_hours**: Частота парсинга в часах (по умолчанию 24)
+    - **max_posts_per_parse**: Максимум постов за раз (по умолчанию 100)
+    - **days_back**: Дни назад для парсинга (по умолчанию 7)
+    """
+    try:
+        # Очистка username от @ и ссылок
+        username = request.username.strip()
+
+        # Удаляем @ если есть
+        if username.startswith("@"):
+            username = username[1:]
+
+        # Если это ссылка, извлекаем username
+        if "t.me/" in username:
+            # Извлекаем часть после t.me/
+            parts = username.split("t.me/")
+            if len(parts) > 1:
+                username = parts[1].split("/")[0]  # Берем часть до первого слэша
+
+        # Проверяем, существует ли уже канал с таким username
+        clean_username = username.lstrip("@")
+        existing_channel = (
+            supabase_manager.client.table("channels")
+            .select("*")
+            .eq("username", clean_username)
+            .execute()
+        )
+
+        if existing_channel.data and len(existing_channel.data) > 0:
+            raise HTTPException(
+                status_code=409, detail=f"Канал @{username} уже существует в системе"
+            )
+
+        # Создаем новый канал
+        channel_data = {
+            "username": username,
+            "title": request.title,
+            "category": request.category,
+            "is_active": request.is_active,
+            "parse_frequency_hours": request.parse_frequency_hours,
+        }
+
+        result = (
+            supabase_manager.client.table("channels").insert(channel_data).execute()
+        )
+
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=500, detail="Не удалось создать канал")
+
+        created_channel = result.data[0]
+        logger.info(f"Создан новый канал: @{username} (ID: {created_channel['id']})")
+
+        return {
+            "message": f"Канал @{username} успешно добавлен",
+            "channel": {
+                "id": created_channel["id"],
+                "username": created_channel["username"],
+                "title": created_channel["title"],
+                "is_active": created_channel["is_active"],
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка создания канала: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка создания канала: {str(e)}")
+
+
+@app.get("/api/user-channels", tags=["channels"])
+async def get_user_channels():
+    """
+    Получает список всех каналов пользователя.
+
+    Returns:
+        Информация о каналах пользователя
+    """
+    try:
+        logger.info("Получение списка каналов пользователя")
+
+        # Проверяем доступность Telegram
+        if not telegram_available or not telegram_analyzer:
+            raise HTTPException(
+                status_code=503,
+                detail="Telegram API недоступен. Требуется авторизация в Telegram.",
+            )
+
+        channels_data = await telegram_analyzer.get_user_channels()
+
+        if "error" in channels_data:
+            logger.error(f"Ошибка получения каналов: {channels_data['error']}")
+            raise HTTPException(status_code=400, detail=channels_data["error"])
+
+        return {
+            "message": f"Найдено {channels_data['total_channels']} каналов",
+            "channels": channels_data["channels"],
+            "stats": {"total_channels": channels_data["total_channels"]},
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка получения каналов пользователя: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Ошибка получения каналов: {str(e)}"
+        )
+
+
+@app.get("/api/folders", tags=["channels"])
+async def get_user_folders():
+    """
+    Получает список всех папок пользователя и каналов в них.
+
+    Returns:
+        Информация о папках и каналах пользователя
+    """
+    try:
+        logger.info("Получение списка папок пользователя")
+
+        # Проверяем доступность Telegram
+        if not telegram_available or not telegram_analyzer:
+            raise HTTPException(
+                status_code=503,
+                detail="Telegram API недоступен. Требуется авторизация в Telegram.",
+            )
+
+        folders_data = await telegram_analyzer.get_channels_from_user_folders()
+
+        if "error" in folders_data:
+            logger.error(f"Ошибка получения папок: {folders_data['error']}")
+            raise HTTPException(status_code=400, detail=folders_data["error"])
+
+        return {
+            "message": f"Найдено {folders_data['total_folders']} папок с {folders_data['total_channels']} каналами",
+            "folders": folders_data["folders"],
+            "stats": {
+                "total_folders": folders_data["total_folders"],
+                "total_channels": folders_data["total_channels"],
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка получения папок пользователя: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения папок: {str(e)}")
+
+
+@app.post("/api/channels/from-user-folder", tags=["channels"])
+async def create_channels_from_user_folder(request: dict):
+    """
+    Создает каналы из выбранной папки пользователя.
+
+    Ожидает JSON с полем 'folder_id'
+    """
+    try:
+        folder_id = request.get("folder_id")
+        if not folder_id:
+            raise HTTPException(status_code=400, detail="Не указан ID папки")
+
+        logger.info(f"Создание каналов из папки пользователя с ID: {folder_id}")
+
+        # Проверяем доступность Telegram
+        if not telegram_available or not telegram_analyzer:
+            raise HTTPException(
+                status_code=503,
+                detail="Telegram API недоступен. Требуется авторизация в Telegram.",
+            )
+
+        # Получаем все папки пользователя
+        folders_data = await telegram_analyzer.get_channels_from_user_folders()
+
+        if "error" in folders_data:
+            logger.error(f"Ошибка получения папок: {folders_data['error']}")
+            raise HTTPException(status_code=400, detail=folders_data["error"])
+
+        # Находим выбранную папку
+        selected_folder = None
+        for folder in folders_data["folders"]:
+            if folder["id"] == int(folder_id):
+                selected_folder = folder
+                break
+
+        if not selected_folder:
+            raise HTTPException(
+                status_code=404, detail=f"Папка с ID {folder_id} не найдена"
+            )
+
+        channels_to_add = []
+        duplicates = []
+        errors = []
+
+        logger.info(
+            f"Найдено {len(selected_folder['channels'])} каналов в папке '{selected_folder['name']}'"
+        )
+
+        # Обрабатываем каждый канал из папки
+        for channel in selected_folder["channels"]:
+            try:
+                username = channel["username"]
+                if not username:
+                    continue
+
+                # Очищаем username
+                clean_username = username.lstrip("@")
+
+                # Проверяем, существует ли уже канал
+                existing_channel = (
+                    supabase_manager.client.table("channels")
+                    .select("*")
+                    .eq("username", clean_username)
+                    .execute()
+                )
+
+                if existing_channel.data and len(existing_channel.data) > 0:
+                    duplicates.append(
+                        {"username": clean_username, "title": channel.get("title", "")}
+                    )
+                    continue
+
+                # Создаем новый канал
+                channel_data = {
+                    "username": clean_username,
+                    "title": channel.get("title", clean_username),
+                    "category": "AI",  # По умолчанию для папок AI
+                    "is_active": True,
+                    "parse_frequency_hours": 24,
+                }
+
+                result = (
+                    supabase_manager.client.table("channels")
+                    .insert(channel_data)
+                    .execute()
+                )
+
+                if result.data:
+                    channels_to_add.append(
+                        {
+                            "username": clean_username,
+                            "title": channel.get("title", ""),
+                            "id": result.data[0]["id"],
+                        }
+                    )
+                    logger.info(f"Создан канал из папки пользователя: {clean_username}")
+                else:
+                    errors.append(
+                        {"username": clean_username, "error": "Ошибка создания в БД"}
+                    )
+
+            except Exception as e:
+                logger.error(
+                    f"Ошибка создания канала {channel.get('username', 'unknown')}: {e}"
+                )
+                errors.append(
+                    {"username": channel.get("username", "unknown"), "error": str(e)}
+                )
+
+        result_message = f"Обработано {len(selected_folder['channels'])} каналов из папки '{selected_folder['name']}'"
+        logger.info(result_message)
+
+        return {
+            "message": result_message,
+            "folder_name": selected_folder["name"],
+            "added": channels_to_add,
+            "duplicates": duplicates,
+            "errors": errors,
+            "stats": {
+                "total": len(selected_folder["channels"]),
+                "added": len(channels_to_add),
+                "duplicates": len(duplicates),
+                "errors": len(errors),
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка обработки папки пользователя: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка обработки папки: {str(e)}")
+
+
+@app.post("/api/channels/from-user-channels", tags=["channels"])
+async def create_channels_from_user_channels(request: dict):
+    """
+    Создает каналы из выбранных каналов пользователя.
+
+    Ожидает JSON с полем 'channel_ids' (массив ID каналов)
+    """
+    try:
+        channel_ids = request.get("channel_ids", [])
+        if not channel_ids:
+            raise HTTPException(status_code=400, detail="Не указаны ID каналов")
+
+        logger.info(
+            f"Создание каналов из списка пользователя: {len(channel_ids)} каналов"
+        )
+
+        # Проверяем доступность Telegram
+        if not telegram_available or not telegram_analyzer:
+            raise HTTPException(
+                status_code=503,
+                detail="Telegram API недоступен. Требуется авторизация в Telegram.",
+            )
+
+        # Получаем все каналы пользователя
+        channels_data = await telegram_analyzer.get_user_channels()
+
+        if "error" in channels_data:
+            logger.error(f"Ошибка получения каналов: {channels_data['error']}")
+            raise HTTPException(status_code=400, detail=channels_data["error"])
+
+        channels_to_add = []
+        duplicates = []
+        errors = []
+
+        logger.info(f"Найдено {len(channels_data['channels'])} каналов пользователя")
+
+        # Фильтруем выбранные каналы
+        selected_channels = [
+            ch for ch in channels_data["channels"] if ch["id"] in channel_ids
+        ]
+
+        logger.info(f"Выбрано {len(selected_channels)} каналов для добавления")
+
+        # Обрабатываем каждый выбранный канал
+        for channel in selected_channels:
+            try:
+                username = channel["username"]
+                if not username:
+                    continue
+
+                # Очищаем username
+                clean_username = username.lstrip("@")
+
+                # Проверяем, существует ли уже канал
+                existing_channel = (
+                    supabase_manager.client.table("channels")
+                    .select("*")
+                    .eq("username", clean_username)
+                    .execute()
+                )
+
+                if existing_channel.data and len(existing_channel.data) > 0:
+                    duplicates.append(
+                        {"username": clean_username, "title": channel.get("title", "")}
+                    )
+                    continue
+
+                # Создаем новый канал
+                channel_data = {
+                    "username": clean_username,
+                    "title": channel.get("title", clean_username),
+                    "category": "AI",  # По умолчанию для пользовательских каналов AI
+                    "is_active": True,
+                    "parse_frequency_hours": 24,
+                }
+
+                result = (
+                    supabase_manager.client.table("channels")
+                    .insert(channel_data)
+                    .execute()
+                )
+
+                if result.data:
+                    channels_to_add.append(
+                        {
+                            "username": clean_username,
+                            "title": channel.get("title", ""),
+                            "id": result.data[0]["id"],
+                        }
+                    )
+                    logger.info(
+                        f"Создан канал из списка пользователя: {clean_username}"
+                    )
+                else:
+                    errors.append(
+                        {"username": clean_username, "error": "Ошибка создания в БД"}
+                    )
+
+            except Exception as e:
+                logger.error(
+                    f"Ошибка создания канала {channel.get('username', 'unknown')}: {e}"
+                )
+                errors.append(
+                    {"username": channel.get("username", "unknown"), "error": str(e)}
+                )
+
+        result_message = f"Обработано {len(selected_channels)} выбранных каналов"
+        logger.info(result_message)
+
+        return {
+            "message": result_message,
+            "added": channels_to_add,
+            "duplicates": duplicates,
+            "errors": errors,
+            "stats": {
+                "selected": len(selected_channels),
+                "added": len(channels_to_add),
+                "duplicates": len(duplicates),
+                "errors": len(errors),
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка обработки каналов пользователя: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Ошибка обработки каналов: {str(e)}"
+        )
+
+
+@app.post("/api/channels/from-folder", tags=["channels"])
+async def create_channels_from_folder(request: dict):
+    """
+    Создает каналы из папки по ссылке на приглашение.
+
+    Ожидает JSON с полем 'folder_link' в формате:
+    {
+        "folder_link": "https://t.me/addlist/kMKpmZjmHnU1Mjli"
+    }
+    """
+    try:
+        folder_link = request.get("folder_link", "").strip()
+        if not folder_link:
+            raise HTTPException(
+                status_code=400, detail="Ссылка на папку не может быть пустой"
+            )
+
+        logger.info(f"Получение каналов из папки: {folder_link}")
+
+        # Проверяем доступность Telegram
+        if not telegram_available or not telegram_analyzer:
+            raise HTTPException(
+                status_code=503,
+                detail="Telegram API недоступен. Требуется авторизация в Telegram для работы с папками.",
+            )
+
+        # Получаем каналы из папки через Telegram API
+        folder_data = await telegram_analyzer.get_channels_from_folder(folder_link)
+
+        if "error" in folder_data:
+            logger.error(f"Ошибка получения папки: {folder_data['error']}")
+
+            # Специальная обработка для случая, когда папка уже добавлена
+            if "Не удалось получить содержимое папки" in folder_data["error"]:
+                return {
+                    "message": "Папка уже добавлена в ваш Telegram",
+                    "folder_link": folder_link,
+                    "recommendation": "Папка уже есть в вашем аккаунте Telegram. Рекомендуем:",
+                    "suggestions": [
+                        "📁 Используйте вкладку 'Из моих каналов' для выбора каналов из ваших папок",
+                        "🔗 Откройте папку в Telegram Desktop/Mobile и скопируйте ссылку оттуда",
+                        "📝 Или добавьте интересующие каналы вручную через вкладку 'Одиночные каналы'",
+                    ],
+                    "error_type": "folder_already_joined",
+                    "stats": {"total": 0, "added": 0, "duplicates": 0, "errors": 0},
+                }
+
+            raise HTTPException(status_code=400, detail=folder_data["error"])
+
+        channels_to_add = []
+        duplicates = []
+        errors = []
+
+        logger.info(
+            f"Найдено {folder_data['total_channels']} каналов в папке '{folder_data['folder_title']}'"
+        )
+
+        # Обрабатываем каждый канал из папки
+        for channel in folder_data["channels"]:
+            try:
+                username = channel["username"]
+                if not username:
+                    continue
+
+                # Очищаем username
+                clean_username = username.lstrip("@")
+
+                # Проверяем, существует ли уже канал
+                existing_channel = (
+                    supabase_manager.client.table("channels")
+                    .select("*")
+                    .eq("username", clean_username)
+                    .execute()
+                )
+
+                if existing_channel.data and len(existing_channel.data) > 0:
+                    duplicates.append(
+                        {"username": clean_username, "title": channel.get("title", "")}
+                    )
+                    continue
+
+                # Создаем новый канал
+                channel_data = {
+                    "username": clean_username,
+                    "title": channel.get("title", clean_username),
+                    "category": "AI",  # По умолчанию для папок AI
+                    "is_active": True,
+                    "parse_frequency_hours": 24,
+                }
+
+                result = (
+                    supabase_manager.client.table("channels")
+                    .insert(channel_data)
+                    .execute()
+                )
+
+                if result.data:
+                    channels_to_add.append(
+                        {
+                            "username": clean_username,
+                            "title": channel.get("title", ""),
+                            "id": result.data[0]["id"],
+                        }
+                    )
+                    logger.info(f"Создан канал из папки: {clean_username}")
+                else:
+                    errors.append(
+                        {"username": clean_username, "error": "Ошибка создания в БД"}
+                    )
+
+            except Exception as e:
+                logger.error(
+                    f"Ошибка создания канала {channel.get('username', 'unknown')}: {e}"
+                )
+                errors.append(
+                    {"username": channel.get("username", "unknown"), "error": str(e)}
+                )
+
+        result_message = f"Обработано {len(folder_data['channels'])} каналов из папки '{folder_data['folder_title']}'"
+        logger.info(result_message)
+
+        return {
+            "message": result_message,
+            "folder_title": folder_data["folder_title"],
+            "added": channels_to_add,
+            "duplicates": duplicates,
+            "errors": errors,
+            "stats": {
+                "total": len(folder_data["channels"]),
+                "added": len(channels_to_add),
+                "duplicates": len(duplicates),
+                "errors": len(errors),
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка обработки папки: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка обработки папки: {str(e)}")
 
 
 # Фоновые функции для парсинга
@@ -2894,8 +3513,8 @@ async def parse_channel_background(
                     )
 
                     # Импортируем необходимые классы
-                    from .app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-                    from .app.viral_post_detector import ViralPostDetector
+                    from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+                    from app.viral_post_detector import ViralPostDetector
 
                     # Проверяем/создаем базовые метрики канала
                     baseline_analyzer = ChannelBaselineAnalyzer(supabase_manager)
@@ -3050,10 +3669,48 @@ async def parse_channels_bulk_background(
                                 f"Автоматический расчет метрик для канала {channel_username}"
                             )
 
-                            from .app.channel_baseline_analyzer import (
+                            # Проверяем наличие достаточного количества постов
+                            if len(posts) < 3:
+                                logger.info(
+                                    f"Недостаточно постов для расчета метрик: {len(posts)} < 3"
+                                )
+
+                                # Для каналов с малым количеством постов пытаемся расширить период парсинга
+                                if days_back < 14:  # Если парсили менее 14 дней
+                                    logger.info(
+                                        f"Расширяем период парсинга для канала {channel_username} до 30 дней"
+                                    )
+                                    # Повторно парсим с большим периодом
+                                    (
+                                        extended_posts,
+                                        _,
+                                    ) = await telegram_analyzer.get_channel_posts(
+                                        channel_username=channel_username,
+                                        days_back=30,  # Увеличиваем до 30 дней
+                                        max_posts=max_posts
+                                        * 2,  # Увеличиваем лимит постов
+                                    )
+
+                                    if len(extended_posts) >= 3:
+                                        logger.info(
+                                            f"После расширения периода получено {len(extended_posts)} постов"
+                                        )
+                                        posts = extended_posts  # Используем расширенные данные
+                                    else:
+                                        logger.info(
+                                            f"Даже после расширения недостаточно постов: {len(extended_posts)}, пропускаем расчет метрик"
+                                        )
+                                        return
+                                else:
+                                    logger.info(
+                                        f"Период парсинга уже большой ({days_back} дней), пропускаем расчет метрик"
+                                    )
+                                    return
+
+                            from app.channel_baseline_analyzer import (
                                 ChannelBaselineAnalyzer,
                             )
-                            from .app.viral_post_detector import ViralPostDetector
+                            from app.viral_post_detector import ViralPostDetector
 
                             baseline_analyzer = ChannelBaselineAnalyzer(
                                 supabase_manager
@@ -3063,17 +3720,33 @@ async def parse_channels_bulk_background(
                             )
 
                             if not baseline:
+                                # Передаем спарсенные посты для расчета базовых метрик
                                 baseline = baseline_analyzer.calculate_channel_baseline(
-                                    channel_username
+                                    channel_username, posts
                                 )
                                 if baseline:
                                     baseline_analyzer.save_channel_baseline(baseline)
+                                    logger.info(
+                                        f"Рассчитаны базовые метрики для канала {channel_username}"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"Не удалось рассчитать базовые метрики для канала {channel_username}"
+                                    )
 
                             if baseline:
                                 detector = ViralPostDetector(baseline_analyzer)
                                 viral_results = detector.detect_viral_posts(
                                     posts, channel_username
                                 )
+                                logger.info(
+                                    f"Рассчитаны вирусные метрики для {len(posts)} постов канала {channel_username}"
+                                )
+                            else:
+                                logger.info(
+                                    f"Пропускаем расчет вирусных метрик для канала {channel_username} (нет базовых метрик)"
+                                )
+                                return
 
                                 processed_count = 0
                                 for post, result in zip(posts, viral_results):
@@ -3500,7 +4173,7 @@ if __name__ == "__main__":
 async def reload_prompts():
     """Перезагружает промпты из базы данных."""
     try:
-        from .app.prompts import prompt_manager
+        from app.prompts import prompt_manager
 
         prompt_manager.reload_db_prompts()
         logger.info("Промпты успешно перезагружены из базы данных")
@@ -3514,7 +4187,7 @@ async def reload_prompts():
 async def get_current_prompt(prompt_name: str):
     """Получает текущий промпт из кэша."""
     try:
-        from .app.prompts import prompt_manager
+        from app.prompts import prompt_manager
 
         template = prompt_manager.get_template(prompt_name)
         if template:

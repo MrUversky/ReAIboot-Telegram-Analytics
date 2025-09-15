@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSupabase } from '@/components/SupabaseProvider'
+import toast from 'react-hot-toast'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Database,
   Play,
@@ -26,7 +31,11 @@ import {
   Trash2,
   Activity,
   Zap,
-  BarChart3
+  BarChart3,
+  Check,
+  X,
+  AlertTriangle,
+  Info
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { apiClient } from '@/lib/api'
@@ -67,6 +76,106 @@ export default function ParsingPage() {
   const [showAddChannel, setShowAddChannel] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [systemStatus, setSystemStatus] = useState<any>(null)
+
+  // Состояния для добавления каналов
+  const [channelsInput, setChannelsInput] = useState('')
+  const [channelTitle, setChannelTitle] = useState('')
+  const [channelCategory, setChannelCategory] = useState('')
+  const [isAddingChannels, setIsAddingChannels] = useState(false)
+  const [addResults, setAddResults] = useState<{
+    success: { username: string; title: string }[]
+    duplicates: { username: string }[]
+    errors: { username: string; error: string }[]
+  }>({ success: [], duplicates: [], errors: [] })
+
+  // Состояния для добавления из папки
+  const [folderLink, setFolderLink] = useState('')
+  const [isAddingFromFolder, setIsAddingFromFolder] = useState(false)
+  const [folderResults, setFolderResults] = useState<{
+    message: string
+    folder_title: string
+    added: Array<{ username: string; title: string; id: number }>
+    duplicates: Array<{ username: string; title: string }>
+    errors: Array<{ username: string; error: string }>
+    stats: {
+      total: number
+      added: number
+      duplicates: number
+      errors: number
+    }
+    recommendation?: string
+    suggestions?: string[]
+    error_type?: string
+  } | null>(null)
+
+  // Состояния для работы с папками пользователя
+  const [userFolders, setUserFolders] = useState<{
+    message: string
+    folders: Array<{
+      id: number
+      name: string
+      channels: Array<{
+        id: number
+        username: string | null
+        title: string
+        participants_count: number | null
+        type: string
+      }>
+    }>
+    stats: {
+      total_folders: number
+      total_channels: number
+    }
+  } | null>(null)
+  const [selectedUserFolder, setSelectedUserFolder] = useState<number | null>(null)
+  const [isLoadingFolders, setIsLoadingFolders] = useState(false)
+  const [isAddingFromUserFolder, setIsAddingFromUserFolder] = useState(false)
+  const [userFolderResults, setUserFolderResults] = useState<{
+    message: string
+    folder_name: string
+    added: Array<{ username: string; title: string; id: number }>
+    duplicates: Array<{ username: string; title: string }>
+    errors: Array<{ username: string; error: string }>
+    stats: {
+      total: number
+      added: number
+      duplicates: number
+      errors: number
+    }
+  } | null>(null)
+
+  // Состояния для работы с каналами пользователя
+  const [userChannels, setUserChannels] = useState<{
+    message: string
+    channels: Array<{
+      id: number
+      username: string | null
+      title: string
+      participants_count: number | null
+      type: string
+    }>
+    stats: {
+      total_channels: number
+    }
+  } | null>(null)
+  const [selectedChannelIds, setSelectedChannelIds] = useState<number[]>([])
+  const [isLoadingChannels, setIsLoadingChannels] = useState(false)
+  const [isAddingFromUserChannels, setIsAddingFromUserChannels] = useState(false)
+  const [userChannelsResults, setUserChannelsResults] = useState<{
+    message: string
+    added: Array<{ username: string; title: string; id: number }>
+    duplicates: Array<{ username: string; title: string }>
+    errors: Array<{ username: string; error: string }>
+    stats: {
+      selected: number
+      added: number
+      duplicates: number
+      errors: number
+    }
+  } | null>(null)
+
+  // Переключатель режима добавления
+  const [addMode, setAddMode] = useState<'channels' | 'folder' | 'user-folder' | 'user-channels'>('channels')
 
   // Настройки парсинга
   const [parsingSettings, setParsingSettings] = useState({
@@ -234,12 +343,12 @@ export default function ParsingPage() {
       }
 
       if (systemStatus?.telegram_authorization_needed) {
-        alert('❌ Ошибка: Telegram не авторизован!\n\nПерейдите в раздел "Администрирование" → "Telegram Auth" для настройки авторизации.')
+        toast.error('❌ Telegram не авторизован!\n\nПерейдите в раздел "Администрирование" → "Telegram Auth" для настройки авторизации.')
         return
       }
 
       if (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available') {
-        alert('❌ Ошибка: Telegram недоступен!\n\nПроверьте подключение к Telegram API.')
+        toast.error('❌ Telegram недоступен!\n\nПроверьте подключение к Telegram API.')
         return
       }
 
@@ -303,12 +412,12 @@ export default function ParsingPage() {
       }
 
       if (systemStatus?.telegram_authorization_needed) {
-        alert('❌ Ошибка: Telegram не авторизован!\n\nПерейдите в раздел "Администрирование" → "Telegram Auth" для настройки авторизации.')
+        toast.error('❌ Telegram не авторизован!\n\nПерейдите в раздел "Администрирование" → "Telegram Auth" для настройки авторизации.')
         return
       }
 
       if (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available') {
-        alert('❌ Ошибка: Telegram недоступен!\n\nПроверьте подключение к Telegram API.')
+        toast.error('❌ Telegram недоступен!\n\nПроверьте подключение к Telegram API.')
         return
       }
 
@@ -425,6 +534,416 @@ export default function ParsingPage() {
         return <Pause className="w-4 h-4 text-yellow-600" />
       default:
         return <Database className="w-4 h-4" />
+    }
+  }
+
+  // Функции для обработки каналов
+  const parseChannelInput = (input: string): string[] => {
+    // Разделяем по различным разделителям: запятые, пробелы, переносы строк
+    const separators = /[,\s\n]+/
+    const rawChannels = input.split(separators).filter(channel => channel.trim().length > 0)
+
+    // Очищаем каждый канал от @ и ссылок
+    return rawChannels.map(channel => {
+      let cleanChannel = channel.trim()
+
+      // Удаляем @ если есть
+      if (cleanChannel.startsWith('@')) {
+        cleanChannel = cleanChannel.slice(1)
+      }
+
+      // Если это ссылка, извлекаем username
+      if (cleanChannel.includes('t.me/')) {
+        const parts = cleanChannel.split('t.me/')
+        if (parts.length > 1) {
+          cleanChannel = parts[1].split('/')[0] // Берем часть до первого слэша
+        }
+      }
+
+      return cleanChannel
+    }).filter(channel => channel.length > 0)
+  }
+
+  const normalizeUsername = (username: string): string => {
+    let normalized = username.trim()
+    if (normalized.startsWith('@')) {
+      normalized = normalized.slice(1)
+    }
+    return normalized
+  }
+
+  const addChannels = async () => {
+    const parsedChannels = parseChannelInput(channelsInput)
+
+    if (parsedChannels.length === 0) {
+      alert('Пожалуйста, введите хотя бы один канал')
+      return
+    }
+
+    setIsAddingChannels(true)
+    setAddResults({ success: [], duplicates: [], errors: [] })
+
+    const results: {
+      success: { username: string; title: string }[]
+      duplicates: { username: string }[]
+      errors: { username: string; error: string }[]
+    } = { success: [], duplicates: [], errors: [] }
+
+    try {
+      for (const username of parsedChannels) {
+        try {
+          // Нормализуем username для проверки дубликатов
+          const normalizedUsername = normalizeUsername(username)
+
+          // Проверяем, существует ли уже канал (сравниваем нормализованные имена)
+          const existingChannel = channels.find(c => normalizeUsername(c.username) === normalizedUsername)
+
+          if (existingChannel) {
+            results.duplicates.push({ username: normalizedUsername })
+            continue
+          }
+
+          // Создаем новый канал
+          const channelData = {
+            username,
+            title: channelTitle || username, // Используем username как заголовок если не указан
+            category: channelCategory,
+            is_active: true,
+            parse_frequency_hours: 24
+          }
+
+          const result = await apiClient.createChannel(channelData)
+          results.success.push({
+            username: result.channel.username,
+            title: result.channel.title
+          })
+
+          // Добавляем канал в локальное состояние
+          setChannels(prev => [...prev, {
+            id: result.channel.id.toString(),
+            name: result.channel.title,
+            username: result.channel.username,
+            is_active: result.channel.is_active,
+            total_posts: 0
+          }])
+
+        } catch (error: any) {
+          let errorMessage = 'Неизвестная ошибка'
+
+          if (error.message?.includes('уже существует')) {
+            results.duplicates.push({ username })
+          } else {
+            if (error.status === 409) {
+              results.duplicates.push({ username })
+            } else {
+              errorMessage = error.message || errorMessage
+              results.errors.push({ username, error: errorMessage })
+            }
+          }
+        }
+      }
+
+      setAddResults(results)
+
+      // Показываем итоговое уведомление
+      const totalProcessed = results.success.length + results.duplicates.length + results.errors.length
+      const successCount = results.success.length
+      const duplicateCount = results.duplicates.length
+      const errorCount = results.errors.length
+
+      let message = `Обработано ${totalProcessed} каналов.`
+
+      if (successCount > 0) {
+        message += `\n✅ Добавлено: ${successCount}`
+      }
+      if (duplicateCount > 0) {
+        message += `\n⚠️ Уже существуют: ${duplicateCount}`
+      }
+      if (errorCount > 0) {
+        message += `\n❌ Ошибки: ${errorCount}`
+      }
+
+      alert(message)
+
+      // Очищаем форму при успехе
+      if (successCount > 0) {
+        setChannelsInput('')
+        setChannelTitle('')
+        setChannelCategory('')
+      }
+
+    } catch (error) {
+      console.error('Error adding channels:', error)
+      alert(`Ошибка при добавлении каналов: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`)
+    } finally {
+      setIsAddingChannels(false)
+    }
+  }
+
+  const resetAddChannelModal = () => {
+    setChannelsInput('')
+    setChannelTitle('')
+    setChannelCategory('')
+    setAddResults({ success: [], duplicates: [], errors: [] })
+    setFolderLink('')
+    setFolderResults(null)
+    setSelectedUserFolder(null)
+    setUserFolderResults(null)
+    setSelectedChannelIds([])
+    setUserChannelsResults(null)
+    setAddMode('channels')
+    setShowAddChannel(false)
+  }
+
+  // Функция для загрузки папок пользователя
+  const loadUserFolders = async () => {
+    setIsLoadingFolders(true)
+    try {
+      const result = await apiClient.getUserFolders()
+      setUserFolders(result)
+    } catch (error: any) {
+      console.error('Ошибка загрузки папок:', error)
+      toast.error(error.message || 'Ошибка загрузки папок пользователя')
+    } finally {
+      setIsLoadingFolders(false)
+    }
+  }
+
+  // Функция для загрузки каналов пользователя
+  const loadUserChannels = async () => {
+    setIsLoadingChannels(true)
+    try {
+      const result = await apiClient.getUserChannels()
+      setUserChannels(result)
+    } catch (error: any) {
+      console.error('Ошибка загрузки каналов:', error)
+      toast.error(error.message || 'Ошибка загрузки каналов пользователя')
+    } finally {
+      setIsLoadingChannels(false)
+    }
+  }
+
+  // Функция для добавления каналов из папки пользователя
+  const handleAddFromUserFolder = async () => {
+    if (!selectedUserFolder) {
+      toast.error('Выберите папку')
+      return
+    }
+
+    // Проверяем статус Telegram перед добавлением
+    console.log('Проверяем статус Telegram для добавления из папки пользователя...')
+    if (!systemStatus) {
+      await loadSystemStatus()
+    }
+
+    if (systemStatus?.telegram_authorization_needed) {
+      toast.error('❌ Telegram не авторизован!\n\nПерейдите в раздел "Администрирование" → "Telegram Auth" для настройки авторизации.')
+      return
+    }
+
+    if (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available') {
+      toast.error('❌ Telegram недоступен!\n\nПроверьте подключение к Telegram API.')
+      return
+    }
+
+    console.log('✅ Telegram готов, добавляем каналы из папки пользователя')
+
+    setIsAddingFromUserFolder(true)
+    setUserFolderResults(null)
+
+    try {
+      const result = await apiClient.createChannelsFromUserFolder(selectedUserFolder)
+      setUserFolderResults(result)
+
+      if (result.stats.added > 0) {
+        toast.success(`Добавлено ${result.stats.added} каналов из папки "${result.folder_name}"`)
+        // Обновляем список каналов
+        await loadParsingData()
+      }
+
+      if (result.stats.duplicates > 0) {
+        toast.error(`${result.stats.duplicates} каналов уже существуют`)
+      }
+
+      if (result.stats.errors > 0) {
+        toast.error(`Ошибок при добавлении: ${result.stats.errors}`)
+      }
+
+    } catch (error: any) {
+      console.error('Ошибка добавления из папки пользователя:', error)
+
+      // Специальная обработка для недоступного Telegram API
+      if (error.message && error.message.includes('Telegram API недоступен')) {
+        toast.error('Telegram API недоступен. Авторизуйтесь в Telegram для работы с папками.')
+      } else {
+        toast.error(error.message || 'Ошибка добавления каналов из папки')
+      }
+    } finally {
+      setIsAddingFromUserFolder(false)
+    }
+  }
+
+  // Функция для добавления выбранных каналов пользователя
+  const handleAddFromUserChannels = async () => {
+    if (selectedChannelIds.length === 0) {
+      toast.error('Выберите хотя бы один канал')
+      return
+    }
+
+    // Проверяем статус Telegram перед добавлением
+    console.log('Проверяем статус Telegram для добавления выбранных каналов...')
+    if (!systemStatus) {
+      await loadSystemStatus()
+    }
+
+    if (systemStatus?.telegram_authorization_needed) {
+      toast.error('❌ Telegram не авторизован!\n\nПерейдите в раздел "Администрирование" → "Telegram Auth" для настройки авторизации.')
+      return
+    }
+
+    if (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available') {
+      toast.error('❌ Telegram недоступен!\n\nПроверьте подключение к Telegram API.')
+      return
+    }
+
+    console.log('✅ Telegram готов, добавляем выбранные каналы')
+
+    setIsAddingFromUserChannels(true)
+    setUserChannelsResults(null)
+
+    try {
+      const result = await apiClient.createChannelsFromUserChannels(selectedChannelIds)
+      setUserChannelsResults(result)
+
+      if (result.stats.added > 0) {
+        toast.success(`Добавлено ${result.stats.added} каналов`)
+        // Обновляем список каналов
+        await loadParsingData()
+      }
+
+      if (result.stats.duplicates > 0) {
+        toast.error(`${result.stats.duplicates} каналов уже существуют`)
+      }
+
+      if (result.stats.errors > 0) {
+        toast.error(`Ошибок при добавлении: ${result.stats.errors}`)
+      }
+
+    } catch (error: any) {
+      console.error('Ошибка добавления выбранных каналов:', error)
+
+      // Специальная обработка для недоступного Telegram API
+      if (error.message && error.message.includes('Telegram API недоступен')) {
+        toast.error('Telegram API недоступен. Авторизуйтесь в Telegram для работы с каналами.')
+      } else {
+        toast.error(error.message || 'Ошибка добавления каналов')
+      }
+    } finally {
+      setIsAddingFromUserChannels(false)
+    }
+  }
+
+  // Функции для управления выбором каналов
+  const handleChannelSelect = (channelId: number, selected: boolean) => {
+    if (selected) {
+      setSelectedChannelIds(prev => [...prev, channelId])
+    } else {
+      setSelectedChannelIds(prev => prev.filter(id => id !== channelId))
+    }
+  }
+
+  const handleSelectAllChannels = () => {
+    if (userChannels) {
+      const allChannelIds = userChannels.channels.map(ch => ch.id)
+      setSelectedChannelIds(allChannelIds)
+    }
+  }
+
+  const handleDeselectAllChannels = () => {
+    setSelectedChannelIds([])
+  }
+
+  // Функция для добавления каналов из папки
+  const handleAddFromFolder = async () => {
+    if (!folderLink.trim()) {
+      toast.error('Введите ссылку на папку')
+      return
+    }
+
+    // Валидация формата ссылки
+    const link = folderLink.trim()
+    if (!link.includes('addlist/') && !link.includes('t.me/addlist/')) {
+      toast.error('Неверный формат ссылки. Используйте ссылку вида:\n• https://t.me/addlist/slug\n• addlist/slug')
+      return
+    }
+
+    // Проверяем статус Telegram перед добавлением
+    console.log('Проверяем статус Telegram для добавления из папки...')
+    if (!systemStatus) {
+      await loadSystemStatus()
+    }
+
+    if (systemStatus?.telegram_authorization_needed) {
+      toast.error('❌ Telegram не авторизован!\n\nПерейдите в раздел "Администрирование" → "Telegram Auth" для настройки авторизации.')
+      return
+    }
+
+    if (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available') {
+      toast.error('❌ Telegram недоступен!\n\nПроверьте подключение к Telegram API.')
+      return
+    }
+
+    console.log('✅ Telegram готов, добавляем каналы из папки')
+
+    setIsAddingFromFolder(true)
+    setFolderResults(null)
+
+    try {
+      const result = await apiClient.createChannelsFromFolder(link)
+
+      // Специальная обработка для случая, когда папка уже добавлена
+      if ((result as any).error_type === 'folder_already_joined') {
+        toast.error('📁 Папка уже добавлена в ваш Telegram!')
+        setFolderResults({
+          message: result.message,
+          folder_title: `Ссылка: ${(result as any).folder_link}`,
+          added: [],
+          duplicates: [],
+          errors: [],
+          stats: result.stats,
+          recommendation: (result as any).recommendation,
+          suggestions: (result as any).suggestions
+        })
+        return
+      }
+
+      setFolderResults(result)
+
+      if (result.stats.added > 0) {
+        toast.success(`Добавлено ${result.stats.added} каналов из папки "${result.folder_title}"`)
+        // Обновляем список каналов
+        await loadParsingData()
+      }
+
+      if (result.stats.duplicates > 0) {
+        toast.error(`${result.stats.duplicates} каналов уже существуют`)
+      }
+
+      if (result.stats.errors > 0) {
+        toast.error(`Ошибок при добавлении: ${result.stats.errors}`)
+      }
+
+    } catch (error: any) {
+      console.error('Ошибка добавления из папки:', error)
+
+      // Специальная обработка для недоступного Telegram API
+      if (error.message && error.message.includes('Telegram API недоступен')) {
+        toast.error('Telegram API недоступен. Авторизуйтесь в Telegram для работы с папками.')
+      } else {
+        toast.error(error.message || 'Ошибка добавления каналов из папки')
+      }
+    } finally {
+      setIsAddingFromFolder(false)
     }
   }
 
@@ -911,6 +1430,740 @@ export default function ParsingPage() {
             <Button onClick={saveSettings}>
               Сохранить настройки
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Channel Modal */}
+      <Dialog open={showAddChannel} onOpenChange={resetAddChannelModal}>
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center">
+              <Plus className="w-5 h-5 mr-2" />
+              Добавить каналы
+            </DialogTitle>
+          </DialogHeader>
+
+          <Tabs value={addMode} onValueChange={(value) => setAddMode(value as 'channels' | 'folder' | 'user-folder' | 'user-channels')} className="w-full">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="channels">Одиночные каналы</TabsTrigger>
+              <TabsTrigger value="folder">Из ссылки на папку</TabsTrigger>
+              <TabsTrigger value="user-folder">Из моих папок</TabsTrigger>
+              <TabsTrigger value="user-channels">Из моих каналов</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="channels" className="space-y-6 mt-6">
+              {/* Help text */}
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Поддерживаемые форматы:</strong><br />
+                  • @username или username<br />
+                  • https://t.me/username<br />
+                  • Несколько каналов через запятую, пробел или новую строку
+                </AlertDescription>
+              </Alert>
+
+              {/* Channels input */}
+              <div className="space-y-2">
+                <Label htmlFor="channels-input">
+                  Каналы для добавления *
+                </Label>
+                <Textarea
+                  id="channels-input"
+                  placeholder={`Примеры:
+@tech_news
+https://t.me/python_dev
+ai_news, tech_startups
+ml_research`}
+                  value={channelsInput}
+                  onChange={(e) => setChannelsInput(e.target.value)}
+                  className="min-h-[120px] font-mono text-sm"
+                />
+                <p className="text-sm text-gray-500">
+                  Введите каналы в любом формате. Система автоматически очистит их от @ и ссылок.
+                </p>
+              </div>
+
+              {/* Preview of parsed channels */}
+              {channelsInput.trim() && (
+                <div className="space-y-2">
+                  <Label>Предварительный просмотр:</Label>
+                  <div className="bg-gray-50 p-3 rounded-lg">
+                    <div className="flex flex-wrap gap-2">
+                      {parseChannelInput(channelsInput).map((channel, index) => (
+                        <Badge key={index} variant="secondary" className="font-mono">
+                          @{channel}
+                        </Badge>
+                      ))}
+                    </div>
+                    <p className="text-sm text-gray-600 mt-2">
+                      Найдено каналов: {parseChannelInput(channelsInput).length}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Channel details */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="channel-title">Название канала</Label>
+                  <Input
+                    id="channel-title"
+                    placeholder="Оставьте пустым для авто-определения"
+                    value={channelTitle}
+                    onChange={(e) => setChannelTitle(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Если не указать, будет использовано имя канала
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="channel-category">Категория</Label>
+                  <Select value={channelCategory} onValueChange={setChannelCategory}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите категорию" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tech">Технологии</SelectItem>
+                      <SelectItem value="business">Бизнес</SelectItem>
+                      <SelectItem value="news">Новости</SelectItem>
+                      <SelectItem value="education">Образование</SelectItem>
+                      <SelectItem value="entertainment">Развлечения</SelectItem>
+                      <SelectItem value="other">Другое</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="folder" className="space-y-6 mt-6">
+              {/* Telegram status warning */}
+              {(systemStatus?.telegram_authorization_needed ||
+                (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available')) && (
+                <Alert className="border-red-200 bg-red-50">
+                  <AlertTriangle className="h-4 w-4 text-red-600" />
+                  <AlertDescription className="text-red-800">
+                    <strong>⚠️ Telegram не готов к работе</strong><br />
+                    {systemStatus?.telegram_authorization_needed
+                      ? 'Необходимо авторизоваться в Telegram. Перейдите в раздел "Администрирование" → "Telegram Auth".'
+                      : 'Telegram API недоступен. Проверьте подключение к Telegram.'
+                    }
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Help text for folder */}
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Как добавить каналы из папки:</strong><br />
+                  • Перейдите в Telegram Desktop или Web<br />
+                  • Найдите папку с каналами (например, "AI" или "Tech")<br />
+                  • Нажмите правой кнопкой на папку → "Copy Link"<br />
+                  • Вставьте ссылку в поле ниже<br />
+                  • Все каналы из папки будут автоматически добавлены
+                </AlertDescription>
+              </Alert>
+
+              {/* Folder link input */}
+              <div className="space-y-2">
+                <Label htmlFor="folder-link">
+                  Ссылка на папку Telegram *
+                </Label>
+                <Input
+                  id="folder-link"
+                  placeholder="https://t.me/addlist/kMKpmZjmHnU1Mjli"
+                  value={folderLink}
+                  onChange={(e) => setFolderLink(e.target.value)}
+                  className="font-mono text-sm"
+                />
+                <p className="text-sm text-gray-500">
+                  Вставьте ссылку на папку из Telegram. Система автоматически получит все каналы из этой папки.
+                </p>
+              </div>
+
+              {/* Folder results */}
+              {folderResults && (
+                <div className="space-y-4">
+                  <Label>Результаты добавления из папки:</Label>
+
+                  <Alert>
+                    {folderResults.recommendation ? (
+                      <Info className="h-4 w-4" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                    <AlertDescription>
+                      <strong className={folderResults.recommendation ? "text-blue-700" : "text-green-700"}>
+                        {folderResults.message}
+                      </strong>
+                      <div className="mt-2 text-sm">
+                        <div>📁 Папка: <strong>{folderResults.folder_title}</strong></div>
+                        <div className="mt-1 flex gap-4">
+                          <span className="text-green-600">✅ Добавлено: {folderResults.stats.added}</span>
+                          <span className="text-yellow-600">⚠️ Дубликаты: {folderResults.stats.duplicates}</span>
+                          <span className="text-red-600">❌ Ошибки: {folderResults.stats.errors}</span>
+                        </div>
+
+                        {folderResults.recommendation && (
+                          <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+                            <div className="font-medium text-blue-800 mb-2">{folderResults.recommendation}</div>
+                            <ul className="space-y-1 text-blue-700">
+                              {folderResults.suggestions?.map((suggestion, index) => (
+                                <li key={index} className="flex items-start">
+                                  <span className="mr-2">•</span>
+                                  <span>{suggestion}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+
+                  {folderResults.added.length > 0 && (
+                    <div>
+                      <strong className="text-green-700">Добавленные каналы:</strong>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {folderResults.added.map((item, index) => (
+                          <Badge key={index} className="bg-green-100 text-green-800">
+                            @{item.username} - {item.title}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {folderResults.duplicates.length > 0 && (
+                    <div>
+                      <strong className="text-yellow-700">Уже существуют:</strong>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {folderResults.duplicates.map((item, index) => (
+                          <Badge key={index} className="bg-yellow-100 text-yellow-800">
+                            @{item.username}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {folderResults.errors.length > 0 && (
+                    <div>
+                      <strong className="text-red-700">Ошибки:</strong>
+                      <div className="mt-2 space-y-1">
+                        {folderResults.errors.map((item, index) => (
+                          <div key={index} className="text-sm">
+                            <Badge className="bg-red-100 text-red-800 mr-2">
+                              @{item.username}
+                            </Badge>
+                            {item.error}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="user-folder" className="space-y-6 mt-6">
+              {/* Telegram status warning */}
+              {(systemStatus?.telegram_authorization_needed ||
+                (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available')) && (
+                <Alert className="border-red-200 bg-red-50">
+                  <AlertTriangle className="h-4 w-4 text-red-600" />
+                  <AlertDescription className="text-red-800">
+                    <strong>⚠️ Telegram не готов к работе</strong><br />
+                    {systemStatus?.telegram_authorization_needed
+                      ? 'Необходимо авторизоваться в Telegram. Перейдите в раздел "Администрирование" → "Telegram Auth".'
+                      : 'Telegram API недоступен. Проверьте подключение к Telegram.'
+                    }
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Help text for user folders */}
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Выберите папку из ваших Telegram папок:</strong><br />
+                  • Система автоматически получит все каналы из выбранной папки<br />
+                  • Будут добавлены только каналы с публичными username<br />
+                  • Существующие каналы будут пропущены
+                </AlertDescription>
+              </Alert>
+
+              {/* Load folders button */}
+              {!userFolders && (
+                <Button
+                  onClick={loadUserFolders}
+                  disabled={isLoadingFolders}
+                  className="w-full"
+                >
+                  {isLoadingFolders ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Загружаем папки...
+                    </>
+                  ) : (
+                    <>
+                      📁 Загрузить мои папки
+                    </>
+                  )}
+                </Button>
+              )}
+
+              {/* User folders list */}
+              {userFolders && (
+                <div className="space-y-4">
+                  <Label>Выберите папку:</Label>
+
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {userFolders.folders.map((folder) => (
+                      <div
+                        key={folder.id}
+                        className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                          selectedUserFolder === folder.id
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                        onClick={() => setSelectedUserFolder(folder.id)}
+                      >
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <div className="font-medium">{folder.name}</div>
+                            <div className="text-sm text-gray-600">
+                              {folder.channels.length} каналов
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            {selectedUserFolder === folder.id && (
+                              <Check className="w-5 h-5 text-blue-600" />
+                            )}
+                          </div>
+                        </div>
+
+                        {selectedUserFolder === folder.id && (
+                          <div className="mt-3 pt-3 border-t border-gray-200">
+                            <div className="text-sm text-gray-600 mb-2">Каналы в папке:</div>
+                            <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                              {folder.channels.slice(0, 10).map((channel) => (
+                                <Badge key={channel.id} variant="secondary" className="text-xs">
+                                  {channel.username ? `@${channel.username}` : channel.title}
+                                </Badge>
+                              ))}
+                              {folder.channels.length > 10 && (
+                                <Badge variant="outline" className="text-xs">
+                                  +{folder.channels.length - 10} ещё
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="text-sm text-gray-600">
+                    Всего папок: {userFolders.stats.total_folders} |
+                    Всего каналов: {userFolders.stats.total_channels}
+                  </div>
+                </div>
+              )}
+
+              {/* User folder results */}
+              {userFolderResults && (
+                <div className="space-y-4">
+                  <Label>Результаты добавления из папки:</Label>
+
+                  <Alert>
+                    <Check className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong className="text-green-700">{userFolderResults.message}</strong>
+                      <div className="mt-2 text-sm">
+                        <div>📁 Папка: <strong>{userFolderResults.folder_name}</strong></div>
+                        <div className="mt-1 flex gap-4">
+                          <span className="text-green-600">✅ Добавлено: {userFolderResults.stats.added}</span>
+                          <span className="text-yellow-600">⚠️ Дубликаты: {userFolderResults.stats.duplicates}</span>
+                          <span className="text-red-600">❌ Ошибки: {userFolderResults.stats.errors}</span>
+                        </div>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+
+                  {userFolderResults.added.length > 0 && (
+                    <div>
+                      <strong className="text-green-700">Добавленные каналы:</strong>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {userFolderResults.added.map((item, index) => (
+                          <Badge key={index} className="bg-green-100 text-green-800">
+                            @{item.username} - {item.title}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {userFolderResults.duplicates.length > 0 && (
+                    <div>
+                      <strong className="text-yellow-700">Уже существуют:</strong>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {userFolderResults.duplicates.map((item, index) => (
+                          <Badge key={index} className="bg-yellow-100 text-yellow-800">
+                            @{item.username}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {userFolderResults.errors.length > 0 && (
+                    <div>
+                      <strong className="text-red-700">Ошибки:</strong>
+                      <div className="mt-2 space-y-1">
+                        {userFolderResults.errors.map((item, index) => (
+                          <div key={index} className="text-sm">
+                            <Badge className="bg-red-100 text-red-800 mr-2">
+                              @{item.username}
+                            </Badge>
+                            {item.error}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="user-channels" className="space-y-6 mt-6">
+              {/* Telegram status warning */}
+              {(systemStatus?.telegram_authorization_needed ||
+                (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available')) && (
+                <Alert className="border-red-200 bg-red-50">
+                  <AlertTriangle className="h-4 w-4 text-red-600" />
+                  <AlertDescription className="text-red-800">
+                    <strong>⚠️ Telegram не готов к работе</strong><br />
+                    {systemStatus?.telegram_authorization_needed
+                      ? 'Необходимо авторизоваться в Telegram. Перейдите в раздел "Администрирование" → "Telegram Auth".'
+                      : 'Telegram API недоступен. Проверьте подключение к Telegram.'
+                    }
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Help text for user channels */}
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Выберите каналы из ваших подписок:</strong><br />
+                  • Система покажет все публичные каналы, на которые вы подписаны<br />
+                  • Вы можете выбрать нужные каналы или добавить все сразу<br />
+                  • Существующие каналы будут пропущены автоматически
+                </AlertDescription>
+              </Alert>
+
+              {/* Load channels button */}
+              {!userChannels && (
+                <Button
+                  onClick={loadUserChannels}
+                  disabled={isLoadingChannels}
+                  className="w-full"
+                >
+                  {isLoadingChannels ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Загружаем каналы...
+                    </>
+                  ) : (
+                    <>
+                      📺 Загрузить мои каналы
+                    </>
+                  )}
+                </Button>
+              )}
+
+              {/* User channels list */}
+              {userChannels && (
+                <div className="space-y-4">
+                  {/* Select all controls */}
+                  <div className="flex justify-between items-center">
+                    <div className="text-sm text-gray-600">
+                      Выбрано: {selectedChannelIds.length} из {userChannels.stats.total_channels}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleSelectAllChannels}
+                      >
+                        Выбрать все
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDeselectAllChannels}
+                      >
+                        Снять выбор
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Channels list */}
+                  <div className="max-h-96 overflow-y-auto space-y-2">
+                    {userChannels.channels.map((channel) => (
+                      <div
+                        key={channel.id}
+                        className={`p-3 border rounded-lg transition-colors ${
+                          selectedChannelIds.includes(channel.id)
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3">
+                            <Checkbox
+                              checked={selectedChannelIds.includes(channel.id)}
+                              onCheckedChange={(checked) =>
+                                handleChannelSelect(channel.id, checked as boolean)
+                              }
+                            />
+                            <div>
+                              <div className="font-medium">
+                                {channel.username ? `@${channel.username}` : channel.title}
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                {channel.title}
+                                {channel.participants_count && (
+                                  <span className="ml-2 text-xs">
+                                    👥 {channel.participants_count.toLocaleString()} подписчиков
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* User channels results */}
+              {userChannelsResults && (
+                <div className="space-y-4">
+                  <Label>Результаты добавления каналов:</Label>
+
+                  <Alert>
+                    <Check className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong className="text-green-700">{userChannelsResults.message}</strong>
+                      <div className="mt-2 text-sm">
+                        <div className="flex gap-4">
+                          <span className="text-green-600">✅ Добавлено: {userChannelsResults.stats.added}</span>
+                          <span className="text-yellow-600">⚠️ Дубликаты: {userChannelsResults.stats.duplicates}</span>
+                          <span className="text-red-600">❌ Ошибки: {userChannelsResults.stats.errors}</span>
+                        </div>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+
+                  {userChannelsResults.added.length > 0 && (
+                    <div>
+                      <strong className="text-green-700">Добавленные каналы:</strong>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {userChannelsResults.added.map((item, index) => (
+                          <Badge key={index} className="bg-green-100 text-green-800">
+                            @{item.username} - {item.title}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {userChannelsResults.duplicates.length > 0 && (
+                    <div>
+                      <strong className="text-yellow-700">Уже существуют:</strong>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {userChannelsResults.duplicates.map((item, index) => (
+                          <Badge key={index} className="bg-yellow-100 text-yellow-800">
+                            @{item.username}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {userChannelsResults.errors.length > 0 && (
+                    <div>
+                      <strong className="text-red-700">Ошибки:</strong>
+                      <div className="mt-2 space-y-1">
+                        {userChannelsResults.errors.map((item, index) => (
+                          <div key={index} className="text-sm">
+                            <Badge className="bg-red-100 text-red-800 mr-2">
+                              @{item.username}
+                            </Badge>
+                            {item.error}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+
+            {/* Results */}
+            {(addResults.success.length > 0 || addResults.duplicates.length > 0 || addResults.errors.length > 0) && (
+              <div className="space-y-4">
+                <Label>Результаты добавления:</Label>
+
+                {addResults.success.length > 0 && (
+                  <Alert>
+                    <Check className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong className="text-green-700">Успешно добавлены ({addResults.success.length}):</strong>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {addResults.success.map((item, index) => (
+                          <Badge key={index} className="bg-green-100 text-green-800">
+                            @{item.username}
+                          </Badge>
+                        ))}
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {addResults.duplicates.length > 0 && (
+                  <Alert>
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong className="text-yellow-700">Уже существуют ({addResults.duplicates.length}):</strong>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {addResults.duplicates.map((item, index) => (
+                          <Badge key={index} className="bg-yellow-100 text-yellow-800">
+                            @{item.username}
+                          </Badge>
+                        ))}
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {addResults.errors.length > 0 && (
+                  <Alert>
+                    <X className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong className="text-red-700">Ошибки ({addResults.errors.length}):</strong>
+                      <div className="mt-2 space-y-1">
+                        {addResults.errors.map((item, index) => (
+                          <div key={index} className="text-sm">
+                            <Badge className="bg-red-100 text-red-800 mr-2">
+                              @{item.username}
+                            </Badge>
+                            {item.error}
+                          </div>
+                        ))}
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            )}
+
+          <div className="flex justify-end gap-3">
+            <Button variant="outline" onClick={resetAddChannelModal} disabled={isAddingChannels || isAddingFromFolder || isAddingFromUserFolder || isAddingFromUserChannels}>
+              Отмена
+            </Button>
+
+            {addMode === 'channels' ? (
+              <Button
+                onClick={addChannels}
+                disabled={isAddingChannels || !channelsInput.trim()}
+              >
+                {isAddingChannels ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Добавляем...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Добавить каналы
+                  </>
+                )}
+              </Button>
+            ) : addMode === 'folder' ? (
+              <Button
+                onClick={handleAddFromFolder}
+                disabled={
+                  isAddingFromFolder ||
+                  !folderLink.trim() ||
+                  systemStatus?.telegram_authorization_needed ||
+                  (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available')
+                }
+              >
+                {isAddingFromFolder ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Получаем каналы...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Добавить из папки
+                  </>
+                )}
+              </Button>
+            ) : addMode === 'user-folder' ? (
+              <Button
+                onClick={handleAddFromUserFolder}
+                disabled={
+                  isAddingFromUserFolder ||
+                  !selectedUserFolder ||
+                  systemStatus?.telegram_authorization_needed ||
+                  (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available')
+                }
+              >
+                {isAddingFromUserFolder ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Получаем каналы...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Добавить из папки
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button
+                onClick={handleAddFromUserChannels}
+                disabled={
+                  isAddingFromUserChannels ||
+                  selectedChannelIds.length === 0 ||
+                  systemStatus?.telegram_authorization_needed ||
+                  (systemStatus?.telegram_status !== 'healthy' && systemStatus?.telegram_status !== 'available')
+                }
+              >
+                {isAddingFromUserChannels ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Добавляем...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Добавить выбранные
+                  </>
+                )}
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>

@@ -7,15 +7,25 @@
 - **[📊 Бизнес-информация](business/)** - аудитория, конкуренты, стратегия
   - [🎯 Целевая аудитория и ICP](business/audience.md)
   - [🏆 Конкурентный анализ](business/competitors.md)
+  - [Content Strategy](business/content-strategy.md)
+  - [Future Ideas](business/future-ideas.md)
   - [Overview](business/overview.md)
+  - [📋 ReAIboot - План развития проекта](business/project-plan.md)
+  - [Youtube Strategy](business/youtube-strategy.md)
 - **[🏗️ Техническая документация](technical/)** - архитектура, API, деплой
+  - [Архитектура системы](technical/architecture/components.md)
+  - [Интеграция с LLM](technical/architecture/llm-integration.md)
+  - [🗂️ Структура проекта ReAIboot](technical/architecture/project-structure.md)
+  - [🦠 Система определения "залетевших" постов (Viral Detection System)](technical/architecture/viral-detection.md)
   - [📡 API документация](technical/api/overview.md)
   - [🚀 Настройка Supabase для ReAIboot](technical/database/schema.md)
+  - [🚀 Настройка Supabase для ReAIboot](technical/database/supabase-setup.md)
   - [🚀 Руководство по развертыванию ReAIboot](technical/deployment/guide.md)
 - **[👥 Руководства пользователей](user-guides/)** - гайды по использованию
   - [👑 Руководство администратора ReAIboot](user-guides/admin-guide.md)
   - [Getting Started](user-guides/getting-started.md)
 - **[💻 Для разработчиков](development/)** - настройка, разработка, тестирование
+  - [🤝 Вклад в разработку ReAIboot](development/contributing.md)
 
 ## 🔍 Быстрый поиск
 

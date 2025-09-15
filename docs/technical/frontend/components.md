@@ -6,6 +6,51 @@
 
 ## React Компоненты
 
+### handleDeselectAllChannels
+
+**Файл:** `reai-boot-ui/src/app/parsing/page.tsx`
+
+**Описание:** Frontend component
+
+**Тип:** React компонент
+
+**Назначение:** [Требуется описание]
+
+**Props:** [Требуется анализ]
+
+**Состояние:** [Требуется анализ]
+
+
+### normalizeUsername
+
+**Файл:** `reai-boot-ui/src/app/parsing/page.tsx`
+
+**Описание:** Frontend component
+
+**Тип:** React компонент
+
+**Назначение:** [Требуется описание]
+
+**Props:** [Требуется анализ]
+
+**Состояние:** [Требуется анализ]
+
+
+### resetAddChannelModal
+
+**Файл:** `reai-boot-ui/src/app/parsing/page.tsx`
+
+**Описание:** Frontend component
+
+**Тип:** React компонент
+
+**Назначение:** [Требуется описание]
+
+**Props:** [Требуется анализ]
+
+**Состояние:** [Требуется анализ]
+
+
 ### RootLayout
 
 **Файл:** `reai-boot-ui/src/app/layout.tsx`
@@ -39,6 +84,19 @@
 Здесь описаны основные React компоненты системы.
 
 ## API Интеграции
+
+### API вызов: fetch(
+
+**Файл:** `reai-boot-ui/src/lib/api.ts`
+
+**Контекст:**
+
+**Тип вызова:** [GET/POST/PUT/DELETE]
+
+**Эндпоинт:** [Требуется анализ]
+
+**Назначение:** [Требуется описание]
+
 
 ### API вызов: fetch(
 

@@ -6,6 +6,84 @@
 
 ## Классы и компоненты
 
+### SupabaseClient
+
+**Файл:** `src/app/supabase_client.py`
+
+**Описание:** Docstring:     """Клиент для работы с Supabase."""      def __init__(self):         self.client: Optional[Any] = None         self._initialize_client()      def _initialize_client(self):         """Инициализация...; Has __init__ method
+
+**Назначение:** [Требуется описание]
+
+**Методы:** [Требуется описание]
+
+**Зависимости:** [Требуется анализ]
+
+
+### ParsingRequest
+
+**Файл:** `src/api_main.py`
+
+**Описание:** No additional info
+
+**Назначение:** [Требуется описание]
+
+**Методы:** [Требуется описание]
+
+**Зависимости:** [Требуется анализ]
+
+
+### BulkParsingRequest
+
+**Файл:** `src/api_main.py`
+
+**Описание:** No additional info
+
+**Назначение:** [Требуется описание]
+
+**Методы:** [Требуется описание]
+
+**Зависимости:** [Требуется анализ]
+
+
+### TelegramAnalyzer
+
+**Файл:** `src/app/telegram_client.py`
+
+**Описание:** Docstring:     """Класс для анализа Telegram-каналов с использованием Telethon."""      def __init__(self, session_name: Optional[str] = None):         """...; Has __init__ method
+
+**Назначение:** [Требуется описание]
+
+**Методы:** [Требуется описание]
+
+**Зависимости:** [Требуется анализ]
+
+
+### ParsingResponse
+
+**Файл:** `src/api_main.py`
+
+**Описание:** No additional info
+
+**Назначение:** [Требуется описание]
+
+**Методы:** [Требуется описание]
+
+**Зависимости:** [Требуется анализ]
+
+
+### ChannelManagementRequest
+
+**Файл:** `src/api_main.py`
+
+**Описание:** No additional info
+
+**Назначение:** [Требуется описание]
+
+**Методы:** [Требуется описание]
+
+**Зависимости:** [Требуется анализ]
+
+
 ### Settings
 
 **Файл:** `src/app/settings.py`
