@@ -338,3 +338,23 @@ Location: Unknown
 ---
 
 *Сгенерировано автоматически: 2025-09-16 00:28:40*
+
+
+## Get Parsing Sessions
+
+**Эндпоинт:** `GET /api/parsing/sessions`
+
+**Аутентификация:** API Key
+
+### Описание
+Автоматически сгенерированная документация для эндпоинта get_parsing_sessions.
+
+### Детали реализации
+```
+Function: get_parsing_sessions
+Location: Unknown
+```
+
+---
+
+*Сгенерировано автоматически: 2025-09-16 00:28:57*

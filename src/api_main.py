@@ -5,27 +5,84 @@
 
 import asyncio
 import logging
+import os
+import jwt
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
 # Импорты из нашего проекта
-from app.llm.orchestrator import LLMOrchestrator
-from app.prompts import prompt_manager
-from app.settings import settings
-from app.supabase_client import SupabaseManager
-from app.telegram_client import TelegramAnalyzer
+from src.app.llm.orchestrator import LLMOrchestrator
+from src.app.prompts import prompt_manager
+from src.app.settings import settings
+from src.app.supabase_client import SupabaseManager
+from src.app.telegram_client import TelegramAnalyzer
+from src.app.telegram_bot import TelegramBotService
+from src.app.reports import ReportGenerator
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Аутентификация
+security = HTTPBearer(auto_error=False, scheme_name="Bearer")
+
+async def get_current_user_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[str]:
+    """
+    Получить текущего пользователя из JWT токена (опционально).
+
+    Для тестирования возвращаем тестовый user_id если токен не передан.
+    Декодируем JWT токен Supabase для получения реального user_id.
+    """
+    logger.info(f"get_current_user_optional called with credentials: {credentials is not None}")
+
+    if credentials and credentials.credentials:
+        logger.info("Attempting to decode JWT token")
+        try:
+            # Декодируем JWT токен
+            token = credentials.credentials
+            decoded = jwt.decode(
+                token,
+                settings.supabase_jwt_secret,
+                algorithms=["HS256"],
+                audience="authenticated"
+            )
+            user_id = decoded.get("sub")
+            if user_id:
+                logger.info(f"Authenticated user: {user_id}")
+                return user_id
+            else:
+                logger.warning("JWT token missing 'sub' claim")
+        except jwt.ExpiredSignatureError:
+            logger.warning("JWT token expired")
+        except jwt.InvalidTokenError as e:
+            logger.warning(f"Invalid JWT token: {e}")
+        except Exception as e:
+            logger.error(f"Error decoding JWT token: {e}")
+    else:
+        logger.info("No credentials provided, using test user")
+
+    # Fallback для тестирования - возвращаем тестовый user_id
+    test_user_id = os.getenv("TEST_USER_ID", "550e8400-e29b-41d4-a716-446655440000")
+    logger.info(f"Using test user_id for development/testing: {test_user_id}")
+    return test_user_id
+
+async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> str:
+    """
+    Получить текущего пользователя из JWT токена (обязательно).
+
+    Пока используем заглушку для тестирования.
+    В будущем здесь будет декодирование JWT токена Supabase.
+    """
+    return await get_current_user_optional(credentials) or "550e8400-e29b-41d4-a716-446655440000"
 
 # Создание FastAPI приложения
 app = FastAPI(
@@ -154,6 +211,7 @@ async def init_telegram():
 
 # Инициализация будет выполнена в startup event
 supabase_manager = SupabaseManager()
+report_generator = ReportGenerator(supabase_manager)
 
 
 # Startup event для инициализации Telegram
@@ -198,6 +256,19 @@ class ParsingRequest(BaseModel):
     channel_username: str
     days_back: int = 7
     max_posts: int = 100
+
+
+class ViralReportRequest(BaseModel):
+    days: int = 7
+    min_viral_score: float = 1.0
+    channel_username: Optional[str] = None
+    send_to_bot: bool = False
+    bot_token: Optional[str] = None
+    chat_id: str = ""
+
+
+class BotTestRequest(BaseModel):
+    chat_id: str
     save_to_db: bool = True
 
 
@@ -290,7 +361,7 @@ async def start_telegram_auth():
     global telegram_analyzer, telegram_authorization_needed, telegram_available
 
     try:
-        from app.telegram_client import TelegramAnalyzer
+        from src.app.telegram_client import TelegramAnalyzer
 
         # Создаем новый analyzer только если его нет или он не инициализирован
         if telegram_analyzer is None:
@@ -487,7 +558,7 @@ async def reset_telegram_auth():
         # Удаляем файлы сессии
         import os
 
-        from app.settings import settings
+        from src.app.settings import settings
 
         session_files = [
             f"{settings.telegram_session}.session",
@@ -649,7 +720,7 @@ async def generate_scenarios_from_analysis(request: Dict[str, Any]) -> Dict[str,
             )
 
             # Создаем фиктивный результат для сохранения сценариев
-            from app.llm.orchestrator import OrchestratorResult, ProcessingStage
+            from src.app.llm.orchestrator import OrchestratorResult, ProcessingStage
 
             fake_result = OrchestratorResult(
                 post_id=f"{post_data['message_id']}_{post_data['channel_username']}",
@@ -1460,7 +1531,7 @@ async def get_channel_baselines():
             else:
                 # Канал без метрик - подсчитываем реальное количество постов
                 try:
-                    from app.supabase_client import supabase_client
+                    from src.app.supabase_client import supabase_client
 
                     posts_count = (
                         supabase_manager.client.table("posts")
@@ -1529,7 +1600,7 @@ async def get_channel_baseline(channel_username: str):
 async def calculate_channel_baseline(channel_username: str):
     """Пересчитать базовые метрики канала."""
     try:
-        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from src.app.channel_baseline_analyzer import ChannelBaselineAnalyzer
 
         analyzer = ChannelBaselineAnalyzer(supabase_manager)
         baseline = analyzer.calculate_channel_baseline(channel_username)
@@ -1563,7 +1634,7 @@ async def calculate_channel_baseline(channel_username: str):
 async def update_all_channel_baselines():
     """Обновить базовые метрики для всех каналов."""
     try:
-        from app.smart_top_posts_filter import SmartTopPostsFilter
+        from src.app.smart_top_posts_filter import SmartTopPostsFilter
 
         filter = SmartTopPostsFilter(supabase_manager)
         channels = supabase_manager.get_channels_needing_baseline_update()
@@ -1588,7 +1659,7 @@ async def recalculate_all_baselines():
     try:
         import json
 
-        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from src.app.channel_baseline_analyzer import ChannelBaselineAnalyzer
 
         analyzer = ChannelBaselineAnalyzer(supabase_manager)
 
@@ -1947,7 +2018,7 @@ async def debug_calculate_baseline(channel_username: str):
     try:
         import json
 
-        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from src.app.channel_baseline_analyzer import ChannelBaselineAnalyzer
 
         logger.info(
             f"🔍 Начинаем отладку расчета базовых метрик для канала {channel_username}"
@@ -2068,8 +2139,8 @@ async def debug_calculate_single_post(post_id: str):
     try:
         import json
 
-        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-        from app.viral_post_detector import ViralPostDetector
+        from src.app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from src.app.viral_post_detector import ViralPostDetector
 
         # Получаем данные поста
         post_result = (
@@ -2193,8 +2264,8 @@ async def calculate_viral_batch(channel_username: str = None, limit: int = 100):
     try:
         import json
 
-        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-        from app.viral_post_detector import ViralPostDetector
+        from src.app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from src.app.viral_post_detector import ViralPostDetector
 
         logger.info(
             f"🚀 Начинаем массовый расчет виральности. Канал: {channel_username}, Лимит: {limit}"
@@ -2304,8 +2375,8 @@ async def calculate_viral_all_posts(channel_username: str = None):
     try:
         import json
 
-        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-        from app.viral_post_detector import ViralPostDetector
+        from src.app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from src.app.viral_post_detector import ViralPostDetector
 
         logger.info(
             f"🚀 Начинаем массовый расчет виральности для ВСЕХ постов. Канал: {channel_username}"
@@ -2414,8 +2485,8 @@ async def calculate_viral_all_posts(channel_username: str = None):
 async def update_post_viral_metrics(post_id: str):
     """Пересчитать viral метрики для поста."""
     try:
-        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-        from app.viral_post_detector import ViralPostDetector
+        from src.app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from src.app.viral_post_detector import ViralPostDetector
 
         # Получаем данные поста
         post_result = (
@@ -2470,8 +2541,8 @@ async def update_post_viral_metrics(post_id: str):
 async def calculate_viral_metrics_batch(channel_username: str = None, limit: int = 100):
     """Пересчитать viral метрики для группы постов."""
     try:
-        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-        from app.viral_post_detector import ViralPostDetector
+        from src.app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from src.app.viral_post_detector import ViralPostDetector
 
         # Получаем посты
         query = supabase_manager.client.table("posts").select("*")
@@ -2534,7 +2605,7 @@ async def ensure_channel_baseline(
 ):
     """Убедиться, что базовые метрики канала существуют и актуальны."""
     try:
-        from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+        from src.app.channel_baseline_analyzer import ChannelBaselineAnalyzer
 
         analyzer = ChannelBaselineAnalyzer(supabase_manager)
 
@@ -3536,8 +3607,8 @@ async def parse_channel_background(
                     )
 
                     # Импортируем необходимые классы
-                    from app.channel_baseline_analyzer import ChannelBaselineAnalyzer
-                    from app.viral_post_detector import ViralPostDetector
+                    from src.app.channel_baseline_analyzer import ChannelBaselineAnalyzer
+                    from src.app.viral_post_detector import ViralPostDetector
 
                     # Проверяем/создаем базовые метрики канала
                     baseline_analyzer = ChannelBaselineAnalyzer(supabase_manager)
@@ -3730,10 +3801,10 @@ async def parse_channels_bulk_background(
                                     )
                                     return
 
-                            from app.channel_baseline_analyzer import (
+                            from src.app.channel_baseline_analyzer import (
                                 ChannelBaselineAnalyzer,
                             )
-                            from app.viral_post_detector import ViralPostDetector
+                            from src.app.viral_post_detector import ViralPostDetector
 
                             baseline_analyzer = ChannelBaselineAnalyzer(
                                 supabase_manager
@@ -4196,7 +4267,7 @@ if __name__ == "__main__":
 async def reload_prompts():
     """Перезагружает промпты из базы данных."""
     try:
-        from app.prompts import prompt_manager
+        from src.app.prompts import prompt_manager
 
         prompt_manager.reload_db_prompts()
         logger.info("Промпты успешно перезагружены из базы данных")
@@ -4210,7 +4281,7 @@ async def reload_prompts():
 async def get_current_prompt(prompt_name: str):
     """Получает текущий промпт из кэша."""
     try:
-        from app.prompts import prompt_manager
+        from src.app.prompts import prompt_manager
 
         template = prompt_manager.get_template(prompt_name)
         if template:
@@ -4226,3 +4297,324 @@ async def get_current_prompt(prompt_name: str):
     except Exception as e:
         logger.error(f"Ошибка при получении промпта: {e}")
         return {"error": str(e)}, 500
+
+
+# ===== REPORTS ENDPOINTS =====
+
+@app.post("/api/reports/viral-analysis", tags=["reports"])
+async def generate_viral_report(
+    request: ViralReportRequest,
+    current_user: Optional[Dict] = None  # TODO: Add auth dependency
+):
+    """
+    Генерировать отчет по виральным постам.
+
+    - **days**: Период анализа в днях (1-30)
+    - **min_viral_score**: Минимальный порог виральности (0.1-10.0)
+    - **channel_username**: Фильтр по конкретному каналу (опционально)
+    - **send_to_bot**: Отправить отчет в Telegram бота
+    - **bot_token**: Токен Telegram бота
+    - **chat_id**: ID чата для отправки
+    """
+    try:
+        logger.info(f"Generating viral report: {request.dict()}")
+        logger.info(f"send_to_bot type: {type(request.send_to_bot)}, value: {request.send_to_bot}")
+        logger.info(f"chat_id type: {type(request.chat_id)}, value: {request.chat_id}")
+        logger.info(f"send_to_bot is truthy: {bool(request.send_to_bot)}")
+        logger.info(f"chat_id is truthy: {bool(request.chat_id)}")
+
+        # Генерируем отчет
+        result = await report_generator.generate_viral_report(
+            days=request.days,
+            min_viral_score=request.min_viral_score,
+            channel_username=request.channel_username
+        )
+
+        if not result["success"]:
+            return {
+                "success": False,
+                "message": result["message"]
+            }, 404
+
+        # Отправляем в бота если нужно
+        if request.send_to_bot and request.chat_id and request.chat_id.strip():
+            logger.info("Отправляем отчет в бота...")
+            # Берем токен из настроек или из .env
+            bot_token = request.bot_token or settings.telegram_bot_token
+            logger.info(f"bot_token: {'***' + bot_token[-10:] if bot_token else 'None'}")
+
+            if not bot_token:
+                logger.warning("Токен бота не найден")
+                result["bot_sent"] = False
+                result["bot_error"] = "Токен бота не найден в настройках или .env"
+            else:
+                logger.info("Вызываем send_report_via_bot...")
+                bot_result = await report_generator.send_report_via_bot(
+                    result,
+                    bot_token,
+                    request.chat_id
+                )
+                logger.info(f"Результат отправки: {bot_result}")
+
+                # Возвращаем полный результат, если есть информация о частях
+                if "parts_sent" in bot_result and bot_result["parts_sent"] > 1:
+                    result["bot_sent"] = bot_result  # Возвращаем полный объект
+                else:
+                    result["bot_sent"] = bot_result["success"]  # Для совместимости возвращаем boolean
+
+                result["bot_error"] = bot_result.get("message")
+        else:
+            logger.info("Отправка в бота не требуется")
+            result["bot_sent"] = None
+            result["bot_error"] = None
+
+        return {
+            "success": True,
+            "data": result
+        }
+
+    except Exception as e:
+        logger.error(f"Error generating viral report: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"Ошибка сервера: {str(e)}"
+        }, 500
+
+
+@app.post("/api/notifications/test-bot", tags=["notifications"])
+async def test_bot_connection(
+    request: BotTestRequest,
+    current_user: Optional[Dict] = None  # TODO: Add auth dependency
+):
+    """
+    Тестировать подключение к Telegram боту.
+
+    - **chat_id**: ID чата для тестирования
+    - **save_to_db**: Сохранить настройки в БД (по умолчанию true)
+    """
+    try:
+        logger.info(f"Testing bot connection: chat_id={request.chat_id}")
+
+        # Создаем сервис с токеном из настроек
+        bot_service = TelegramBotService(settings.telegram_bot_token)
+        result = await bot_service.test_connection(request.chat_id)
+
+        # Сохраняем в БД если успешно и нужно
+        if result["success"] and request.save_to_db:
+            try:
+                # TODO: Сохранить настройки в notification_settings
+                logger.info("Bot settings saved to database")
+            except Exception as e:
+                logger.warning(f"Failed to save bot settings: {e}")
+
+        return {
+            "success": result["success"],
+            "message": result.get("message", "Тест завершен"),
+            "data": result
+        }
+
+    except Exception as e:
+        logger.error(f"Error testing bot connection: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"Ошибка тестирования: {str(e)}"
+        }, 500
+
+
+@app.get("/api/reports/history", tags=["reports"])
+async def get_reports_history(
+    limit: int = 20,
+    offset: int = 0,
+    current_user: Optional[Dict] = None  # TODO: Add auth dependency
+):
+    """
+    Получить историю отправленных отчетов.
+
+    - **limit**: Количество записей (1-100)
+    - **offset**: Смещение для пагинации
+    """
+    try:
+        # TODO: Реализовать получение истории из notification_history
+        # Пока возвращаем пустой массив
+        return {
+            "success": True,
+            "data": [],
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": 0
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting reports history: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"Ошибка получения истории: {str(e)}"
+        }, 500
+
+
+# ===== NOTIFICATION SETTINGS ENDPOINTS =====
+
+@app.get("/api/notifications/settings", tags=["notifications"])
+async def get_notification_settings(current_user: Optional[str] = Depends(get_current_user_optional)):
+    """
+    Получить настройки уведомлений пользователя.
+    """
+    try:
+        # Используем user_id из токена аутентификации или тестовый
+        user_id = current_user or "550e8400-e29b-41d4-a716-446655440000"
+
+        # Получить настройки из БД
+        settings = supabase_manager.client.table('notification_settings').select('*').eq('user_id', user_id).execute()
+
+        if settings.data:
+            return {
+                "success": True,
+                "data": settings.data[0]
+            }
+        else:
+            return {
+                "success": True,
+                "data": None  # Нет настроек
+            }
+
+    except Exception as e:
+        logger.error(f"Error getting notification settings: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"Ошибка получения настроек: {str(e)}"
+        }, 500
+
+
+@app.post("/api/notifications/settings", tags=["notifications"])
+async def save_notification_settings(settings: Dict[str, Any], authorization: Optional[str] = Header(None, alias="Authorization")):
+    """
+    Сохранить настройки уведомлений.
+
+    - **bot_name**: Имя бота (опционально)
+    - **chat_id**: ID чата для уведомлений (опционально)
+    - **is_active**: Включены ли уведомления
+    """
+    try:
+        # Получаем user_id из заголовка или используем тестовый
+        current_user = None
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization.replace("Bearer ", "")
+            try:
+                decoded = jwt.decode(
+                    token,
+                    settings.supabase_jwt_secret,
+                    algorithms=["HS256"],
+                    audience="authenticated"
+                )
+                current_user = decoded.get("sub")
+                logger.info(f"Authenticated user: {current_user}")
+            except Exception as e:
+                logger.warning(f"JWT decode error: {e}")
+
+        if not current_user:
+            current_user = os.getenv("TEST_USER_ID", "550e8400-e29b-41d4-a716-446655440000")
+            logger.info(f"Using test user_id: {current_user}")
+
+        logger.info(f"Saving notification settings for user {current_user}: {settings}")
+
+        # Используем user_id из токена аутентификации или тестовый
+        user_id = current_user
+
+        # Сохранить настройки в БД (токен бота берется из .env, не сохраняем в БД)
+        data = {
+            "user_id": user_id,
+            "bot_name": settings.get("bot_name"),
+            "chat_id": settings.get("chat_id"),
+            "is_active": settings.get("is_active", True),
+            "updated_at": "NOW()"
+        }
+
+        logger.info(f"Saving data to DB: {data}")
+
+        result = supabase_manager.client.table('notification_settings').upsert(data).execute()
+
+        return {
+            "success": True,
+            "data": result.data[0] if result.data else None
+        }
+
+    except Exception as e:
+        logger.error(f"Error saving notification settings: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"Ошибка сохранения настроек: {str(e)}"
+        }, 500
+
+
+@app.post("/api/notifications/get-chat-id", tags=["notifications"])
+async def get_chat_id_from_bot(current_user: Optional[str] = Depends(get_current_user_optional)):
+    """
+    Получить chat_id из последних обновлений бота.
+
+    Этот метод проверяет последние сообщения бота и находит
+    chat_id последнего сообщения от пользователя.
+    """
+    try:
+        logger.info(f"Attempting to get chat_id from bot updates for user {current_user}")
+
+        # Создаем сервис для работы с ботом (токен из настроек)
+        bot_service = TelegramBotService(settings.telegram_bot_token)
+
+        # Получить chat_id из последнего обновления
+        result = await bot_service.get_last_chat_id()
+
+        if result["success"]:
+            logger.info(f"Successfully retrieved chat_id: {result.get('chat_id')}")
+        else:
+            logger.warning(f"Failed to get chat_id: {result.get('message')}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting chat ID: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"Ошибка получения chat_id: {str(e)}"
+        }, 500
+
+
+@app.get("/api/notifications/history", tags=["notifications"])
+async def get_notifications_history(
+    limit: int = 20,
+    offset: int = 0,
+    current_user: Optional[str] = Depends(get_current_user_optional)
+):
+    """
+    Получить историю отправленных уведомлений.
+
+    - **limit**: Количество записей (1-100)
+    - **offset**: Смещение для пагинации
+    """
+    try:
+        # Используем user_id из токена аутентификации или тестовый
+        user_id = current_user or "550e8400-e29b-41d4-a716-446655440000"
+
+        # Получить историю из БД
+        history = supabase_manager.client.table('notification_history').select('*').eq('user_id', user_id).order('sent_at', desc=True).range(offset, offset + limit - 1).execute()
+
+        # Получить общее количество
+        count = supabase_manager.client.table('notification_history').select('*', count='exact').eq('user_id', user_id).execute()
+
+        return {
+            "success": True,
+            "data": history.data or [],
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": count.count or 0
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting notifications history: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"Ошибка получения истории: {str(e)}"
+        }, 500

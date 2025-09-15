@@ -1,0 +1,1 @@
+INSERT INTO auth.users (id, email, created_at, updated_at) VALUES ('550e8400-e29b-41d4-a716-446655440000', 'test@example.com', NOW(), NOW()) ON CONFLICT (id) DO NOTHING; INSERT INTO profiles (id, email, full_name, role, created_at, updated_at) VALUES ('550e8400-e29b-41d4-a716-446655440000', 'test@example.com', 'Test User', 'admin', NOW(), NOW()) ON CONFLICT (id) DO NOTHING;

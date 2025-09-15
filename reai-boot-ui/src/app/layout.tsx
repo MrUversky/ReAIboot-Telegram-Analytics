@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { SupabaseProvider } from "@/components/SupabaseProvider";
-import { Navigation } from "@/components/Navigation";
+import { LayoutClient } from "@/components/LayoutClient";
 import { ApiErrorBoundary } from "@/components/ApiErrorBoundary";
 import { Toaster } from "react-hot-toast";
 
@@ -23,12 +23,9 @@ export default function RootLayout({
       <body className={inter.className}>
         <ApiErrorBoundary>
           <SupabaseProvider>
-            <div className="min-h-screen bg-gray-50">
-              <Navigation />
-              <main className="container mx-auto px-4 py-8">
-                {children}
-              </main>
-            </div>
+            <LayoutClient>
+              {children}
+            </LayoutClient>
           </SupabaseProvider>
         </ApiErrorBoundary>
         <Toaster

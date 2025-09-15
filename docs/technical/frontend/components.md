@@ -6,6 +6,21 @@
 
 ## React Компоненты
 
+### handleAnalysisComplete
+
+**Файл:** `reai-boot-ui/src/app/posts/page.tsx`
+
+**Описание:** Frontend component
+
+**Тип:** React компонент
+
+**Назначение:** [Требуется описание]
+
+**Props:** [Требуется анализ]
+
+**Состояние:** [Требуется анализ]
+
+
 ### getTopPosts
 
 **Файл:** `reai-boot-ui/src/app/posts/page.tsx`

@@ -139,19 +139,80 @@ class TelegramBotService:
             # Форматируем отчет для Telegram
             report_text = self._format_viral_report(report_data)
 
-            # Telegram ограничивает сообщения 4096 символами
-            if len(report_text) > 4000:
-                report_text = report_text[:4000] + "\n\n... (сообщение обрезано)"
+            # Разбиваем на части по 4000 символов каждая
+            max_length = 4000
+            messages = []
 
-            # Отправляем отчет
-            result = await self.send_message(chat_id, report_text)
-
-            if result["success"]:
-                logger.info(f"Viral report sent successfully to chat {chat_id}")
+            if len(report_text) <= max_length:
+                messages = [report_text]
             else:
-                logger.error(f"Failed to send viral report to chat {chat_id}")
+                # Разбиваем на части, стараясь не разрывать слова
+                current_pos = 0
+                while current_pos < len(report_text):
+                    # Находим конец части (не больше max_length)
+                    end_pos = min(current_pos + max_length, len(report_text))
 
-            return result
+                    # Если это не конец текста, пытаемся найти конец слова
+                    if end_pos < len(report_text):
+                        # Ищем последний пробел или перенос строки в последних 100 символах
+                        look_back = min(100, end_pos - current_pos)
+                        last_space = report_text.rfind(' ', current_pos + max_length - look_back, end_pos)
+                        last_newline = report_text.rfind('\n', current_pos + max_length - look_back, end_pos)
+
+                        # Используем лучший разрыв (предпочитаем перенос строки)
+                        break_pos = max(last_space, last_newline)
+                        if break_pos > current_pos:
+                            end_pos = break_pos
+
+                    # Добавляем часть сообщения
+                    part = report_text[current_pos:end_pos].strip()
+                    if part:
+                        messages.append(part)
+
+                    current_pos = end_pos
+
+            # Отправляем все части
+            results = []
+            for i, message_part in enumerate(messages, 1):
+                # Добавляем информацию о части для многочастных сообщений
+                if len(messages) > 1:
+                    if i == 1:
+                        # Для первой части добавляем в конец
+                        part_info = f"\n\n📄 Продолжение в следующей части..."
+                        if len(message_part + part_info) <= max_length:
+                            message_part += part_info
+                    else:
+                        # Для последующих частей добавляем в начало
+                        continuation_info = f"📄 Продолжение части {i}/{len(messages)}\n\n"
+                        message_part = continuation_info + message_part
+
+                result = await self.send_message(chat_id, message_part)
+                results.append(result)
+
+                # Небольшая пауза между отправками
+                if i < len(messages):
+                    await asyncio.sleep(0.5)
+
+            # Проверяем, все ли сообщения отправлены успешно
+            all_success = all(r["success"] for r in results)
+            failed_count = sum(1 for r in results if not r["success"])
+
+            if all_success:
+                logger.info(f"Viral report sent successfully to chat {chat_id} ({len(messages)} parts)")
+                return {
+                    "success": True,
+                    "parts_sent": len(messages),
+                    "message_ids": [r["message_id"] for r in results if r["success"]]
+                }
+            else:
+                logger.error(f"Failed to send {failed_count} parts of viral report to chat {chat_id}")
+                return {
+                    "success": False,
+                    "error": "partial_send",
+                    "message": f"Отправлено {len(messages) - failed_count}/{len(messages)} частей",
+                    "parts_sent": len(messages) - failed_count,
+                    "total_parts": len(messages)
+                }
 
         except Exception as e:
             logger.error(f"Error sending viral report: {e}")

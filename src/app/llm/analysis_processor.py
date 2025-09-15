@@ -65,41 +65,61 @@ class AnalysisProcessor(BaseLLMProcessor):
             )
 
         try:
-            # Извлекаем данные поста
-            post_text = input_data.get("text", "")
-            views = input_data.get("views", 0)
-            reactions = input_data.get("reactions", 0)
-            replies = input_data.get("replies", 0)
-            forwards = input_data.get("forwards", 0)
-            channel_title = input_data.get("channel_title", "")
-            score = input_data.get("score", 0)
+            # Проверяем, передан ли custom_prompt
+            custom_prompt = input_data.get("custom_prompt")
+            if custom_prompt:
+                # Используем кастомный промпт для анализа трендов
+                post_text = input_data.get("text", "")
+                if not post_text:
+                    return ProcessingResult(
+                        success=False,
+                        error="Текст для анализа пустой",
+                        processing_time=time.time() - start_time
+                    )
 
-            if not post_text:
-                return ProcessingResult(
-                    success=False,
-                    error="Текст поста пустой",
-                    processing_time=time.time() - start_time
-                )
+                system_prompt = "Ты - эксперт по анализу социальных медиа и трендов. Твоя задача - проанализировать виральные посты и выявить общие паттерны, темы и тенденции, которые делают контент популярным."
+                user_prompt = custom_prompt
+            else:
+                # Стандартный анализ поста
+                # Извлекаем данные поста
+                post_text = input_data.get("text", "")
+                views = input_data.get("views", 0)
+                reactions = input_data.get("reactions", 0)
+                replies = input_data.get("replies", 0)
+                forwards = input_data.get("forwards", 0)
+                channel_title = input_data.get("channel_title", "")
+                score = input_data.get("score", 0)
 
-            # Получаем system и user промпты из базы данных
-            system_prompt = self.prompt_manager.get_system_prompt("analyze_success", {
-                "score": score
-            })
+                if not post_text:
+                    return ProcessingResult(
+                        success=False,
+                        error="Текст поста пустой",
+                        processing_time=time.time() - start_time
+                    )
 
-            user_prompt = self.prompt_manager.get_user_prompt("analyze_success", {
-                "post_text": post_text,
-                "views": views,
-                "likes": reactions,  # используем reactions как likes
-                "forwards": forwards,
-                "replies": replies,
-                "channel_title": channel_title,
-                "score": score
-            })
+                # Получаем system и user промпты из базы данных
+                system_prompt = self.prompt_manager.get_system_prompt("analyze_success", {
+                    "score": score
+                })
+
+                user_prompt = self.prompt_manager.get_user_prompt("analyze_success", {
+                    "post_text": post_text,
+                    "views": views,
+                    "likes": reactions,  # используем reactions как likes
+                    "forwards": forwards,
+                    "replies": replies,
+                    "channel_title": channel_title,
+                    "score": score
+                })
 
             # Debug: логируем промпты
             logger.debug(f"🧪 ANALYSIS PROMPT - System: {system_prompt}")
             logger.debug(f"🧪 ANALYSIS PROMPT - User: {user_prompt}")
-            logger.debug(f"🧪 ANALYSIS INPUT DATA: post_text={post_text[:100]}..., views={views}, reactions={reactions}, score={score}")
+
+            if custom_prompt:
+                logger.debug(f"🧪 ANALYSIS INPUT DATA: custom_prompt mode, text length={len(post_text)}")
+            else:
+                logger.debug(f"🧪 ANALYSIS INPUT DATA: post_text={post_text[:100]}..., views={views}, reactions={reactions}, score={score}")
 
             # Выполняем запрос к Claude
             success, response, error = await self._make_request_with_retry(
@@ -131,15 +151,12 @@ class AnalysisProcessor(BaseLLMProcessor):
             logger.debug(f"🧪 ANALYSIS RESPONSE LENGTH: {len(result_text)} chars")
             logger.debug(f"🧪 ANALYSIS TOKENS USED: {tokens_used}")
 
-            # Валидируем ответ по схеме
-            schema = self.get_stage_schema("analysis")
-            success, validated_data, validation_error = self.validate_json_response(result_text, schema)
-
-            if success and validated_data:
+            if custom_prompt:
+                # Для кастомного промпта возвращаем просто текст ответа
                 return ProcessingResult(
                     success=True,
                     data={
-                        **validated_data,
+                        "analysis": result_text,
                         "analysis_model": "claude-3-5-sonnet"
                     },
                     tokens_used=tokens_used,
@@ -147,28 +164,44 @@ class AnalysisProcessor(BaseLLMProcessor):
                     raw_response=result_text
                 )
             else:
-                logger.warning(f"Analysis validation failed: {validation_error}")
-                # Попытка fallback парсинга
-                try:
-                    import json
-                    fallback_data = json.loads(result_text)
+                # Валидируем ответ по схеме для стандартного анализа
+                schema = self.get_stage_schema("analysis")
+                success, validated_data, validation_error = self.validate_json_response(result_text, schema)
 
+                if success and validated_data:
                     return ProcessingResult(
                         success=True,
                         data={
-                            **fallback_data,
-                            "analysis_model": "claude-3-5-sonnet",
-                            "validation_warning": validation_error
+                            **validated_data,
+                            "analysis_model": "claude-3-5-sonnet"
                         },
                         tokens_used=tokens_used,
                         processing_time=time.time() - start_time,
                         raw_response=result_text
                     )
-                except json.JSONDecodeError:
-                    logger.warning(f"Не удалось распарсить JSON от Claude: {result_text}")
+                else:
+                    logger.warning(f"Analysis validation failed: {validation_error}")
+                    # Попытка fallback парсинга
+                    try:
+                        import json
+                        fallback_data = json.loads(result_text)
 
-                    # Возвращаем сырой текст как fallback
-                    return ProcessingResult(
+                        return ProcessingResult(
+                            success=True,
+                            data={
+                                **fallback_data,
+                                "analysis_model": "claude-3-5-sonnet",
+                                "validation_warning": validation_error
+                            },
+                            tokens_used=tokens_used,
+                            processing_time=time.time() - start_time,
+                            raw_response=result_text
+                        )
+                    except json.JSONDecodeError:
+                        logger.warning(f"Не удалось распарсить JSON от Claude: {result_text}")
+
+                        # Возвращаем сырой текст как fallback
+                        return ProcessingResult(
                         success=True,
                         data={
                             "raw_analysis": result_text,

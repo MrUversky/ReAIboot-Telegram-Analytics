@@ -37,7 +37,8 @@ import {
   Filter,
   Download,
   Play,
-  RotateCcw
+  RotateCcw,
+  Bot
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { apiClient } from '@/lib/api'
@@ -1153,6 +1154,10 @@ export default function AdminPage() {
               <Button variant="outline" onClick={() => setShowSandboxModal(true)}>
                 <FlaskRound className="w-4 h-4 mr-2" />
                 Песочница
+              </Button>
+              <Button variant="outline" onClick={() => router.push('/admin/notifications')}>
+                <Bot className="w-4 h-4 mr-2" />
+                Уведомления
               </Button>
               <Button
                 variant={telegramStatus?.telegram_authorization_needed ? "default" : "outline"}

@@ -17,3 +17,4 @@ supabase>=2.3.0
 psycopg2-binary>=2.9.0
 jsonschema>=4.19.0
 requests>=2.31.0
+python-telegram-bot>=20.7

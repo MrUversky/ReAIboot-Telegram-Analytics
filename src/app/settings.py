@@ -27,6 +27,10 @@ class Settings:
         self.telegram_api_hash = os.getenv("TELEGRAM_API_HASH", "")
         self.telegram_session = os.getenv("TELEGRAM_SESSION", "telegram_session")
 
+        # Telegram Bot настройки
+        self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT", "8364173996:AAH2BFSuA_cN7JHQ5Gds5O3MNS-KXxpK0wE")
+        self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+
         # OpenAI настройки
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.openai_base_url = os.getenv("OPENAI_BASE_URL")
@@ -34,7 +38,7 @@ class Settings:
 
         # Claude настройки
         self.anthropic_api_key = os.getenv("CLAUDE_API_KEY") or os.getenv(
-            "ANTHROPIC_API_KEY"
+            "CLAUDE_API_KEY"
         )
         self.anthropic_model_name = os.getenv(
             "ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"
@@ -50,6 +54,7 @@ class Settings:
         self.supabase_url = os.getenv("SUPABASE_URL")
         self.supabase_anon_key = os.getenv("SUPABASE_ANON_KEY")
         self.supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        self.supabase_jwt_secret = os.getenv("SUPABASE_JWT_SECRET") or self.supabase_service_role_key
 
         # Настройки приложения
         self.timezone = os.getenv("TZ", "Asia/Tbilisi")

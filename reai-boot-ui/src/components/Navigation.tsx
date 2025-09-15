@@ -14,12 +14,14 @@ import {
   Database,
   Bot,
   TrendingUp,
-  Book
+  Book,
+  FileBarChart
 } from 'lucide-react'
 
 const navigation = [
   { name: 'Аналитика', href: '/', icon: BarChart3 },
   { name: 'Посты', href: '/posts', icon: FileText },
+  { name: 'Отчеты', href: '/reports', icon: FileBarChart },
   { name: 'Сценарии', href: '/scenarios', icon: Video },
   { name: 'Парсинг', href: '/parsing', icon: Database },
   { name: 'Wiki', href: '/wiki', icon: Book },

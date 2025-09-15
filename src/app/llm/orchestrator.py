@@ -1159,6 +1159,147 @@ class LLMOrchestrator:
         stage_cost = cost_report['breakdown'][stage_name]['cost_usd']
         return round(stage_cost, 6)
 
+    async def process_trends_analysis(
+        self,
+        analysis_data: Dict[str, Any]
+    ) -> OrchestratorResult:
+        """
+        Анализировать тренды виральных постов.
+
+        Args:
+            analysis_data: Данные для анализа трендов
+
+        Returns:
+            OrchestratorResult с результатом анализа
+        """
+        import time
+        start_time = time.time()
+
+        result = OrchestratorResult(
+            post_id="trends_analysis",
+            overall_success=False,
+            stages=[],
+            total_tokens=0,
+            total_time=0.0
+        )
+
+        try:
+            # Этап 1: Подготовка данных
+            stage_start = time.time()
+            posts_text = analysis_data.get("posts", "")
+            posts_count = analysis_data.get("count", 0)
+
+            result.stages.append(ProcessingStage(
+                stage_name="data_preparation",
+                success=True,
+                data={"posts_count": posts_count},
+                tokens_used=0,
+                processing_time=time.time() - stage_start
+            ))
+
+            # Этап 2: Анализ трендов через LLM
+            stage_start = time.time()
+
+            # Получаем промпт для анализа трендов
+            prompt = prompt_manager.get_user_prompt(
+                "viral_trends_analysis",
+                variables={
+                    "posts_text": posts_text,
+                    "posts_count": posts_count
+                }
+            )
+
+            # Используем AnalysisProcessor для выполнения анализа трендов
+            analysis_result = await self.analysis_processor.process({
+                "text": posts_text,
+                "custom_prompt": prompt,
+                "context": f"Анализ трендов {posts_count} виральных постов"
+            })
+
+            if analysis_result.success and analysis_result.data:
+                # Логируем сырой ответ от LLM для диагностики
+                logger.info(f"LLM raw response data keys: {list(analysis_result.data.keys()) if analysis_result.data else 'No data'}")
+                logger.info(f"LLM raw response: {analysis_result.raw_response}")
+                logger.info(f"LLM tokens used: {analysis_result.tokens_used}")
+                raw_analysis_text = analysis_result.data.get("analysis", analysis_result.raw_response or "")
+                logger.info(f"LLM analysis text length: {len(raw_analysis_text)}")
+                logger.info(f"LLM analysis text preview: {raw_analysis_text[:500]}...")
+
+                # Парсим результат анализа
+                trends_data = self._parse_trends_analysis(raw_analysis_text)
+
+                logger.info(f"Parsed trends data: summary length={len(trends_data.get('summary', ''))}, recommendations count={len(trends_data.get('recommendations', []))}")
+
+                result.stages.append(ProcessingStage(
+                    stage_name="trends_analysis",
+                    success=True,
+                    data=trends_data,
+                    tokens_used=analysis_result.tokens_used,
+                    processing_time=time.time() - stage_start
+                ))
+
+                result.final_data = trends_data
+                result.total_tokens = analysis_result.tokens_used
+                result.overall_success = True
+            else:
+                result.stages.append(ProcessingStage(
+                    stage_name="trends_analysis",
+                    success=False,
+                    error=analysis_result.error or "Не удалось выполнить анализ трендов",
+                    tokens_used=analysis_result.tokens_used,
+                    processing_time=time.time() - stage_start
+                ))
+
+        except Exception as e:
+            logger.error(f"Error in trends analysis: {e}", exc_info=True)
+            result.error = str(e)
+            result.stages.append(ProcessingStage(
+                stage_name="error",
+                success=False,
+                error=str(e),
+                processing_time=time.time() - start_time
+            ))
+
+        result.total_time = time.time() - start_time
+        return result
+
+    def _parse_trends_analysis(self, analysis_text: str) -> Dict[str, Any]:
+        """
+        Парсит результат анализа трендов от LLM.
+
+        Args:
+            analysis_text: Текст анализа от модели
+
+        Returns:
+            Структурированные данные анализа
+        """
+        try:
+            # Простой парсинг - в будущем можно улучшить
+            summary = analysis_text.strip()
+
+            # Извлекаем рекомендации (ищем маркеры)
+            recommendations = []
+            lines = analysis_text.split('\n')
+
+            for line in lines:
+                line = line.strip()
+                if line.startswith(('•', '-', '*')) or 'рекоменд' in line.lower():
+                    recommendations.append(line.lstrip('•-* '))
+
+            return {
+                "summary": summary,
+                "recommendations": recommendations[:5],  # Ограничиваем до 5 рекомендаций
+                "raw_analysis": analysis_text
+            }
+
+        except Exception as e:
+            logger.error(f"Error parsing trends analysis: {e}")
+            return {
+                "summary": analysis_text,
+                "recommendations": [],
+                "raw_analysis": analysis_text
+            }
+
     def get_processor_status(self) -> Dict[str, bool]:
         """Возвращает статус доступности всех процессоров."""
         return self.available_processors.copy()

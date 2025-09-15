@@ -17,8 +17,9 @@ cleanup_old_processes() {
     # Останавливаем старые процессы npm
     pkill -f "npm.*run.*dev" 2>/dev/null && echo "✅ Старые npm процессы остановлены"
 
-    # Останавливаем процессы на портах 8000 и 3000
+    # Останавливаем процессы на портах 8000, 8001 и 3000
     lsof -ti:8000 | xargs kill -9 2>/dev/null && echo "✅ Освобожден порт 8000"
+    lsof -ti:8001 | xargs kill -9 2>/dev/null && echo "✅ Освобожден порт 8001"
     lsof -ti:3000 | xargs kill -9 2>/dev/null && echo "✅ Освобожден порт 3000"
 
     # Удаляем поврежденные файлы сессий
@@ -72,9 +73,10 @@ if [ ! -f ".env" ]; then
     echo "  - SUPABASE_ANON_KEY (опционально)"
 fi
 
-# Запуск backend API в фоне
+# Запуск backend API в фоне на порту 8001
 echo "🔄 Запуск backend API..."
-PYTHONPATH="$PWD/src" ./venv/bin/python scripts/run_api.py &
+export TEST_USER_ID="299bec46-494d-449e-92d5-c88eb055436a"
+PYTHONPATH="$PWD/src" ./venv/bin/python -m uvicorn src.api_main:app --host 0.0.0.0 --port 8001 &
 API_PID=$!
 
 # Ожидание запуска API
@@ -82,9 +84,9 @@ echo "⏳ Ожидание запуска API сервера..."
 sleep 5
 
 # Проверка работы API
-if curl -s http://localhost:8000/health > /dev/null; then
-    echo "✅ API сервер запущен на http://localhost:8000"
-    echo "📚 Документация API: http://localhost:8000/docs"
+if curl -s http://localhost:8001/docs > /dev/null; then
+    echo "✅ API сервер запущен на http://localhost:8001"
+    echo "📚 Документация API: http://localhost:8001/docs"
 else
     echo "❌ Ошибка запуска API сервера!"
     kill $API_PID 2>/dev/null
@@ -109,12 +111,12 @@ if [ -d "reai-boot-ui" ]; then
         echo "Необходимые переменные:"
         echo "  - NEXT_PUBLIC_SUPABASE_URL"
         echo "  - NEXT_PUBLIC_SUPABASE_ANON_KEY"
-        echo "  - NEXT_PUBLIC_API_URL=http://localhost:8000"
+        echo "  - NEXT_PUBLIC_API_URL=http://localhost:8001"
     fi
 
-    # Запуск frontend в фоне
+    # Запуск frontend в фоне с правильным API URL
     echo "🎨 Запуск Next.js frontend..."
-    npm run dev &
+    NEXT_PUBLIC_API_URL=http://localhost:8001 npm run dev &
     FRONTEND_PID=$!
 
     # Ожидание запуска frontend
@@ -125,8 +127,8 @@ if [ -d "reai-boot-ui" ]; then
     echo "🎉 ПРОЕКТ ЗАПУЩЕН!"
     echo "================================="
     echo "🌐 Frontend: http://localhost:3000"
-    echo "🔧 Backend API: http://localhost:8000"
-    echo "📚 API Docs: http://localhost:8000/docs"
+    echo "🔧 Backend API: http://localhost:8001"
+    echo "📚 API Docs: http://localhost:8001/docs"
     echo ""
     echo "Сервисы запущены в фоне. Для остановки используйте:"
     echo "  ./stop_project.sh"
@@ -142,8 +144,8 @@ else
     echo "⚠️  Директория reai-boot-ui не найдена!"
     echo "Frontend не будет запущен"
     echo ""
-    echo "✅ Backend API запущен на http://localhost:8000"
-    echo "📚 Документация: http://localhost:8000/docs"
+    echo "✅ Backend API запущен на http://localhost:8001"
+    echo "📚 Документация: http://localhost:8001/docs"
 
     # Сохраняем PID API для остановки
     echo "$API_PID" > .running_pids

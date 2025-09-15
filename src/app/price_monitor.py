@@ -222,7 +222,7 @@ class LLMPriceMonitor:
 
     def _fetch_from_anthropic_api(self, model: str, token_type: str) -> Optional[float]:
         """Получить цену из Anthropic API."""
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        api_key = os.getenv("CLAUDE_API_KEY")
         if not api_key:
             return None
 
